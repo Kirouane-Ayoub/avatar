@@ -3,371 +3,552 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Lisa</title>
+  <title>Lisa - AI Voice Assistant</title>
   <script src="https://cdn.jsdelivr.net/npm/livekit-client@2/dist/livekit-client.umd.js"></script>
+  <script type="importmap">
+  { "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js/+esm",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/",
+      "talkinghead": "https://cdn.jsdelivr.net/gh/met4citizen/TalkingHead@1.7/modules/talkinghead.mjs"
+  } }
+  </script>
   <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
     * { margin: 0; padding: 0; box-sizing: border-box; }
+
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: #0a0a0a;
-      color: #e5e5e5;
+      font-family: 'Inter', -apple-system, sans-serif;
+      background: #09090b;
+      color: #e4e4e7;
       height: 100vh;
+      overflow: hidden;
+    }
+
+    /* ── Layout ── */
+    .app {
       display: flex;
+      height: 100vh;
+    }
+
+    /* ── Left: Avatar ── */
+    .avatar-side {
+      flex: 0 0 480px;
+      display: flex;
+      flex-direction: column;
       align-items: center;
       justify-content: center;
+      background: linear-gradient(180deg, #0f0a1a 0%, #09090b 50%, #0a0d12 100%);
+      position: relative;
+      border-right: 1px solid #1a1a2e;
     }
-    .container {
+    #avatar {
+      width: 420px;
+      height: 500px;
+      border-radius: 20px;
+      overflow: hidden;
+      background: transparent;
+    }
+    #avatar canvas { border-radius: 20px; }
+    #avatarMsg {
+      position: absolute;
+      bottom: 100px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 0.7rem;
+      color: #666;
+      background: rgba(0,0,0,0.7);
+      padding: 4px 14px;
+      border-radius: 12px;
+      backdrop-filter: blur(8px);
+    }
+    .avatar-label {
+      position: absolute;
+      bottom: 40px;
       text-align: center;
-      max-width: 480px;
-      width: 100%;
-      padding: 2rem;
     }
-    h1 {
-      font-size: 1.5rem;
-      margin-bottom: 0.5rem;
-      color: #fff;
-    }
-    .subtitle {
-      font-size: 0.85rem;
-      color: #888;
-      margin-bottom: 2rem;
-    }
-    #btn {
-      width: 120px;
-      height: 120px;
-      border-radius: 50%;
-      border: 2px solid #333;
-      background: #1a1a1a;
-      color: #fff;
-      font-size: 0.9rem;
+    .avatar-label h2 {
+      font-size: 1.1rem;
       font-weight: 600;
-      cursor: pointer;
-      transition: all 0.3s;
+      color: #fff;
+      letter-spacing: -0.02em;
+    }
+    .avatar-label p {
+      font-size: 0.65rem;
+      color: #52525b;
+      margin-top: 2px;
+    }
+
+    /* Ambient glow behind avatar */
+    .avatar-side::before {
+      content: '';
+      position: absolute;
+      width: 300px;
+      height: 300px;
+      background: radial-gradient(circle, rgba(124,58,237,0.08) 0%, transparent 70%);
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -60%);
+      pointer-events: none;
+    }
+
+    /* ── Right: Panel ── */
+    .panel-side {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      padding: 2rem 2.5rem;
+      min-width: 0;
+    }
+
+    /* Header */
+    .header {
       display: flex;
       align-items: center;
-      justify-content: center;
-      margin: 0 auto 1.5rem;
-      position: relative;
-      z-index: 2;
-    }
-    #btn:hover { border-color: #555; background: #222; }
-    #btn.connected {
-      border-color: #22c55e;
-      background: #052e16;
-      box-shadow: 0 0 30px rgba(34, 197, 94, 0.15);
-    }
-    #btn.connecting {
-      border-color: #eab308;
-      background: #1a1500;
-    }
-    #status {
-      font-size: 0.8rem;
-      color: #666;
-      min-height: 1.2rem;
-    }
-    .mic-select {
+      justify-content: space-between;
       margin-bottom: 1.5rem;
+      padding-bottom: 1rem;
+      border-bottom: 1px solid #18181b;
     }
-    .mic-select select {
-      background: #1a1a1a;
-      color: #e5e5e5;
-      border: 1px solid #333;
-      border-radius: 6px;
-      padding: 0.4rem 0.6rem;
-      font-size: 0.8rem;
-      width: 100%;
-      max-width: 300px;
-      cursor: pointer;
-      outline: none;
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
     }
-    .mic-select select:hover { border-color: #555; }
-    .mic-select label {
-      display: block;
+    .brand-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: #22c55e;
+      box-shadow: 0 0 8px rgba(34,197,94,0.5);
+    }
+    .brand-dot.offline { background: #52525b; box-shadow: none; }
+    .brand h1 {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #a1a1aa;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .connect-btn {
+      padding: 0.45rem 1.4rem;
+      border-radius: 8px;
+      border: 1px solid #27272a;
+      background: #18181b;
+      color: #e4e4e7;
       font-size: 0.75rem;
-      color: #666;
-      margin-bottom: 0.3rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+      font-family: inherit;
+    }
+    .connect-btn:hover { background: #27272a; border-color: #3f3f46; }
+    .connect-btn.connected {
+      background: #052e16;
+      border-color: #22c55e;
+      color: #86efac;
+    }
+    .connect-btn.connecting {
+      background: #1a1500;
+      border-color: #eab308;
+      color: #fde047;
     }
 
-    /* Wave visualizer */
-    .wave-wrap {
-      position: relative;
-      height: 100px;
-      margin-bottom: 1.5rem;
+    /* Status */
+    .status-bar {
+      font-size: 0.68rem;
+      color: #52525b;
+      margin-bottom: 1.2rem;
+      min-height: 1rem;
+    }
+
+    /* Mic select */
+    .mic-bar {
       display: flex;
       align-items: center;
-      justify-content: center;
+      gap: 0.6rem;
+      margin-bottom: 1.5rem;
     }
-    canvas#waveCanvas {
-      width: 100%;
-      height: 100%;
-      display: block;
+    .mic-bar label {
+      font-size: 0.65rem;
+      color: #52525b;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      font-weight: 500;
     }
+    .mic-bar select {
+      flex: 1;
+      background: #18181b;
+      color: #a1a1aa;
+      border: 1px solid #27272a;
+      border-radius: 6px;
+      padding: 0.35rem 0.6rem;
+      font-size: 0.72rem;
+      font-family: inherit;
+      outline: none;
+      max-width: 320px;
+    }
+    .mic-bar select:hover { border-color: #3f3f46; }
 
-    .panel { display: none; }
-    .panel.visible { display: block; }
+    /* Avatar controls */
+    .avatar-controls {
+      display: flex;
+      gap: 0.4rem;
+      margin-bottom: 1.2rem;
+      flex-wrap: wrap;
+    }
+    .ctrl-group {
+      display: flex;
+      gap: 0.25rem;
+      align-items: center;
+      background: #111114;
+      border: 1px solid #1c1c22;
+      border-radius: 8px;
+      padding: 0.3rem 0.5rem;
+    }
+    .ctrl-label {
+      font-size: 0.55rem;
+      color: #3f3f46;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      font-weight: 600;
+      margin-right: 0.3rem;
+    }
+    .ctrl-btn {
+      background: #18181b;
+      border: 1px solid #27272a;
+      color: #71717a;
+      font-size: 0.6rem;
+      font-family: inherit;
+      padding: 0.2rem 0.5rem;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+    .ctrl-btn:hover { background: #27272a; border-color: #3f3f46; color: #e4e4e7; }
+    .ctrl-btn.active { background: #1e1b4b; border-color: #6366f1; color: #a5b4fc; }
 
-    /* Transcript */
-    .transcript-header {
+    /* Conversation */
+    .chat-section { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+    .chat-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-top: 1.5rem;
-      margin-bottom: 0.4rem;
+      margin-bottom: 0.5rem;
     }
-    .section-title {
-      font-size: 0.7rem;
-      color: #555;
+    .chat-title {
+      font-size: 0.65rem;
+      color: #3f3f46;
       text-transform: uppercase;
-      letter-spacing: 0.05em;
+      letter-spacing: 0.06em;
+      font-weight: 600;
     }
     .clear-btn {
       background: none;
-      border: 1px solid #333;
-      color: #666;
-      font-size: 0.65rem;
-      padding: 0.15rem 0.45rem;
+      border: 1px solid #27272a;
+      color: #52525b;
+      font-size: 0.6rem;
+      font-family: inherit;
+      padding: 2px 8px;
       border-radius: 4px;
       cursor: pointer;
-      transition: all 0.2s;
+      transition: all 0.15s;
     }
-    .clear-btn:hover { border-color: #555; color: #aaa; }
-    .transcript {
-      padding: 0.6rem;
-      background: #111;
-      border-radius: 8px;
-      border: 1px solid #222;
-      min-height: 60px;
-      max-height: 220px;
+    .clear-btn:hover { border-color: #3f3f46; color: #a1a1aa; }
+
+    .chat {
+      flex: 1;
+      background: #0f0f12;
+      border: 1px solid #1c1c22;
+      border-radius: 12px;
+      padding: 0.8rem;
       overflow-y: auto;
-      text-align: left;
+      min-height: 0;
     }
+    .chat::-webkit-scrollbar { width: 4px; }
+    .chat::-webkit-scrollbar-track { background: transparent; }
+    .chat::-webkit-scrollbar-thumb { background: #27272a; border-radius: 4px; }
+
     .msg {
       display: flex;
-      gap: 0.5rem;
-      margin-bottom: 0.5rem;
-      padding: 0.4rem 0.6rem;
-      border-radius: 6px;
+      gap: 0.6rem;
+      margin-bottom: 0.6rem;
+      padding: 0.5rem 0.7rem;
+      border-radius: 8px;
+      font-size: 0.8rem;
       line-height: 1.5;
-      font-size: 0.85rem;
+      animation: msgIn 0.2s ease;
+    }
+    @keyframes msgIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
     }
     .msg:last-child { margin-bottom: 0; }
     .msg.user {
-      background: rgba(59, 130, 246, 0.08);
-      border-left: 2px solid #3b82f6;
+      background: rgba(59,130,246,0.05);
+      border-left: 2px solid rgba(59,130,246,0.3);
     }
     .msg.agent {
-      background: rgba(34, 197, 94, 0.08);
-      border-left: 2px solid #22c55e;
+      background: rgba(34,197,94,0.05);
+      border-left: 2px solid rgba(34,197,94,0.3);
     }
-    .msg .avatar {
+    .msg .av {
       flex-shrink: 0;
-      width: 20px; height: 20px;
-      border-radius: 50%;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 0.6rem; font-weight: 700;
+      width: 22px; height: 22px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.55rem;
+      font-weight: 700;
       margin-top: 1px;
     }
-    .msg.user .avatar { background: #1e3a5f; color: #93c5fd; }
-    .msg.agent .avatar { background: #14532d; color: #86efac; }
-    .msg .text { color: #d4d4d4; }
-    .msg.user .text { color: #bfdbfe; }
-    .msg.agent .text { color: #bbf7d0; }
+    .msg.user .av { background: #172554; color: #60a5fa; }
+    .msg.agent .av { background: #052e16; color: #4ade80; }
+    .msg.user .t { color: #93c5fd; }
+    .msg.agent .t { color: #86efac; }
+
+    /* Empty state */
+    .chat-empty {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: #27272a;
+      font-size: 0.75rem;
+    }
 
     /* Metrics */
-    .metrics {
-      margin-top: 0.75rem;
-      padding: 0.6rem 0.8rem;
-      background: #111;
-      border-radius: 8px;
-      border: 1px solid #222;
-      font-size: 0.75rem;
-      font-family: 'SF Mono', 'Fira Code', monospace;
-      text-align: left;
-    }
-    .metrics-row {
+    .metrics-bar {
       display: flex;
-      justify-content: space-between;
-      padding: 0.15rem 0;
+      gap: 1.2rem;
+      margin-top: 0.8rem;
+      padding-top: 0.8rem;
+      border-top: 1px solid #18181b;
     }
-    .metrics-label { color: #666; }
-    .metrics-value { color: #888; font-weight: 600; }
-    .metrics-value.good { color: #22c55e; }
-    .metrics-value.ok { color: #eab308; }
-    .metrics-value.slow { color: #ef4444; }
+    .metric {
+      display: flex;
+      flex-direction: column;
+      gap: 0.15rem;
+    }
+    .metric-label {
+      font-size: 0.55rem;
+      color: #3f3f46;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      font-weight: 600;
+    }
+    .metric-value {
+      font-size: 0.72rem;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      color: #52525b;
+      font-weight: 600;
+    }
+    .metric-value.good { color: #22c55e; }
+    .metric-value.ok { color: #eab308; }
+    .metric-value.slow { color: #ef4444; }
+
+    /* Responsive */
+    @media (max-width: 900px) {
+      .app { flex-direction: column; }
+      .avatar-side {
+        flex: 0 0 280px;
+        border-right: none;
+        border-bottom: 1px solid #1a1a2e;
+      }
+      #avatar { width: 240px; height: 280px; }
+      .avatar-label { bottom: 10px; }
+      .panel-side { padding: 1rem 1.5rem; }
+    }
   </style>
 </head>
 <body>
-  <div class="container">
-    <h1>Lisa</h1>
-    <p class="subtitle">Voice Assistant</p>
-    <div class="wave-wrap">
-      <canvas id="waveCanvas"></canvas>
-    </div>
-    <div class="mic-select">
-      <label for="micSelect">Microphone</label>
-      <select id="micSelect"><option value="">Loading devices...</option></select>
-    </div>
-    <button id="btn" onclick="toggle()">Connect</button>
-    <div id="status"></div>
-    <div class="panel" id="chatPanel">
-      <div class="transcript-header">
-        <span class="section-title">Conversation</span>
-        <button class="clear-btn" onclick="clearChat()">Clear</button>
+  <div class="app">
+    <!-- Left: Avatar -->
+    <div class="avatar-side">
+      <div id="avatar"><span id="avatarMsg">Click Connect to start</span></div>
+      <div class="avatar-label">
+        <h2>Lisa</h2>
+        <p>AI Voice Assistant</p>
       </div>
-      <div class="transcript" id="transcript"></div>
-      <div class="metrics" id="metricsPanel">
-        <div class="section-title" style="margin-bottom:0.3rem">STT</div>
-        <div class="metrics-row">
-          <span class="metrics-label">Processing</span>
-          <span class="metrics-value" id="m-stt-dur">--</span>
-        </div>
-        <div class="metrics-row">
-          <span class="metrics-label">Audio in</span>
-          <span class="metrics-value" id="m-stt-audio">--</span>
-        </div>
-        <div class="metrics-row">
-          <span class="metrics-label">Transcription</span>
-          <span class="metrics-value" id="m-stt-trans">--</span>
-        </div>
+    </div>
 
-        <div class="section-title" style="margin-top:0.5rem; margin-bottom:0.3rem">LLM</div>
-        <div class="metrics-row">
-          <span class="metrics-label">TTFT</span>
-          <span class="metrics-value" id="m-llm-ttft">--</span>
+    <!-- Right: Panel -->
+    <div class="panel-side">
+      <div class="header">
+        <div class="brand">
+          <div class="brand-dot offline" id="dot"></div>
+          <h1>Lisa</h1>
         </div>
+        <button class="connect-btn" id="btn" onclick="toggle()">Connect</button>
+      </div>
 
-        <div class="section-title" style="margin-top:0.5rem; margin-bottom:0.3rem">TTS</div>
-        <div class="metrics-row">
-          <span class="metrics-label">TTFB</span>
-          <span class="metrics-value" id="m-tts-ttfb">--</span>
-        </div>
-        <div class="metrics-row">
-          <span class="metrics-label">Synthesis</span>
-          <span class="metrics-value" id="m-tts-dur">--</span>
-        </div>
-        <div class="metrics-row">
-          <span class="metrics-label">Audio out</span>
-          <span class="metrics-value" id="m-tts-audio">--</span>
-        </div>
-        <div class="metrics-row">
-          <span class="metrics-label">Characters</span>
-          <span class="metrics-value" id="m-tts-chars">--</span>
-        </div>
+      <div class="status-bar" id="status"></div>
 
-        <div style="border-top:1px solid #222; margin-top:0.4rem; padding-top:0.3rem">
-          <div class="section-title" style="margin-bottom:0.3rem">Pipeline</div>
-          <div class="metrics-row">
-            <span class="metrics-label">End-to-end</span>
-            <span class="metrics-value" id="m-e2e">--</span>
+      <div class="mic-bar">
+        <label>Mic</label>
+        <select id="micSelect"><option>Loading...</option></select>
+      </div>
+
+      <div class="avatar-controls">
+        <div class="ctrl-group">
+          <span class="ctrl-label">Mood</span>
+          <button class="ctrl-btn active" onclick="setMood('happy')">Happy</button>
+          <button class="ctrl-btn" onclick="setMood('neutral')">Neutral</button>
+          <button class="ctrl-btn" onclick="setMood('sad')">Sad</button>
+          <button class="ctrl-btn" onclick="setMood('angry')">Angry</button>
+          <button class="ctrl-btn" onclick="setMood('love')">Love</button>
+          <button class="ctrl-btn" onclick="setMood('sleep')">Sleep</button>
+        </div>
+        <div class="ctrl-group">
+          <span class="ctrl-label">Gesture</span>
+          <button class="ctrl-btn" onclick="doGesture('handup')">Wave</button>
+          <button class="ctrl-btn" onclick="doGesture('thumbup')">Thumbs Up</button>
+          <button class="ctrl-btn" onclick="doGesture('ok')">OK</button>
+          <button class="ctrl-btn" onclick="doGesture('shrug')">Shrug</button>
+          <button class="ctrl-btn" onclick="doGesture('namaste')">Namaste</button>
+        </div>
+        <div class="ctrl-group">
+          <span class="ctrl-label">View</span>
+          <button class="ctrl-btn" onclick="setAvatarView('head')">Face</button>
+          <button class="ctrl-btn active" onclick="setAvatarView('upper')">Upper</button>
+          <button class="ctrl-btn" onclick="setAvatarView('mid')">Mid</button>
+          <button class="ctrl-btn" onclick="setAvatarView('full')">Full</button>
+        </div>
+      </div>
+
+      <div class="chat-section">
+        <div class="chat-header">
+          <span class="chat-title">Conversation</span>
+          <button class="clear-btn" onclick="clearChat()">Clear</button>
+        </div>
+        <div class="chat" id="transcript">
+          <div class="chat-empty" id="emptyState">Start a conversation with Lisa</div>
+        </div>
+        <div class="metrics-bar">
+          <div class="metric">
+            <span class="metric-label">STT</span>
+            <span class="metric-value" id="m-stt">--</span>
+          </div>
+          <div class="metric">
+            <span class="metric-label">LLM</span>
+            <span class="metric-value" id="m-llm">--</span>
+          </div>
+          <div class="metric">
+            <span class="metric-label">TTS</span>
+            <span class="metric-value" id="m-tts">--</span>
+          </div>
+          <div class="metric">
+            <span class="metric-label">End-to-End</span>
+            <span class="metric-value" id="m-e2e">--</span>
           </div>
         </div>
       </div>
     </div>
   </div>
 
-  <script>
-    const TOKEN_URL = '/api/token';
+  <script type="module">
+    import { TalkingHead } from "talkinghead";
 
+    const TOKEN_URL = '/api/token';
     const btn = document.getElementById('btn');
+    const dot = document.getElementById('dot');
     const statusEl = document.getElementById('status');
     const transcript = document.getElementById('transcript');
-    const canvas = document.getElementById('waveCanvas');
-    const ctx = canvas.getContext('2d');
+    const emptyState = document.getElementById('emptyState');
     const micSelect = document.getElementById('micSelect');
+    const avatarMsg = document.getElementById('avatarMsg');
 
-    let room = null;
-    let connected = false;
-    let audioContext = null;
-    let agentAnalyser = null;
-    let micAnalyser = null;
-    let animationId = null;
+    let room = null, connected = false, head = null;
 
-    // Populate microphone list
-    async function loadMicDevices() {
+    // ── Avatar ──
+    async function loadAvatar() {
       try {
-        // Need a brief getUserMedia call to get device labels
-        const tempStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        tempStream.getTracks().forEach(t => t.stop());
-
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        const mics = devices.filter(d => d.kind === 'audioinput');
-        micSelect.innerHTML = '';
-        mics.forEach((mic, i) => {
-          const opt = document.createElement('option');
-          opt.value = mic.deviceId;
-          opt.textContent = mic.label || `Microphone ${i + 1}`;
-          micSelect.appendChild(opt);
+        head = new TalkingHead(document.getElementById('avatar'), {
+          ttsEndpoint: null,
+          cameraView: 'upper',
+          cameraRotateEnable: true,
+          lipsyncModules: ['en'],
         });
-      } catch {
-        micSelect.innerHTML = '<option value="">Mic access denied</option>';
+        avatarMsg.textContent = 'Loading 3D model...';
+
+        await head.showAvatar({
+          url: './brunette.glb',
+          body: 'F',
+          avatarMood: 'happy',
+          lipsyncLang: 'en',
+        }, (ev) => {
+          if (ev.lengthComputable) {
+            avatarMsg.textContent = `Loading... ${Math.round(ev.loaded / ev.total * 100)}%`;
+          }
+        });
+
+        avatarMsg.style.display = 'none';
+        head.setMood('happy');
+      } catch (err) {
+        console.error('Avatar error:', err);
+        avatarMsg.textContent = 'Avatar failed to load';
       }
     }
-    loadMicDevices();
 
-    // Refresh list when devices change (plug/unplug)
-    navigator.mediaDevices.addEventListener('devicechange', loadMicDevices);
+    let avatarLoaded = false;
+    document.getElementById('btn').addEventListener('click', async () => {
+      if (!avatarLoaded) {
+        avatarLoaded = true;
+        await loadAvatar();
+      }
+    }, { once: true });
 
-    // Resize canvas to match CSS size
-    function resizeCanvas() {
-      const rect = canvas.parentElement.getBoundingClientRect();
-      canvas.width = rect.width * window.devicePixelRatio;
-      canvas.height = rect.height * window.devicePixelRatio;
-      ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+    // ── Mic ──
+    async function loadMics() {
+      try {
+        const s = await navigator.mediaDevices.getUserMedia({ audio: true });
+        s.getTracks().forEach(t => t.stop());
+        const devs = await navigator.mediaDevices.enumerateDevices();
+        micSelect.innerHTML = '';
+        devs.filter(d => d.kind === 'audioinput').forEach((m, i) => {
+          const o = document.createElement('option');
+          o.value = m.deviceId;
+          o.textContent = m.label || `Mic ${i+1}`;
+          micSelect.appendChild(o);
+        });
+      } catch { micSelect.innerHTML = '<option>No mic</option>'; }
     }
-    resizeCanvas();
-    window.addEventListener('resize', resizeCanvas);
+    loadMics();
 
-    async function toggle() {
-      if (connected) disconnect();
-      else await connect();
-    }
+    // ── Connection ──
+    window.toggle = () => { connected ? disconnect() : connect(); };
 
     async function connect() {
-      btn.className = 'connecting';
+      btn.className = 'connect-btn connecting';
       btn.textContent = 'Connecting...';
-      statusEl.textContent = 'Fetching token...';
-
+      statusEl.textContent = 'Establishing connection...';
       try {
-        const res = await fetch(TOKEN_URL);
-        const data = await res.json();
-
+        const data = await (await fetch(TOKEN_URL)).json();
         room = new LivekitClient.Room({
           audioCaptureDefaults: { autoGainControl: true, noiseSuppression: true },
         });
 
-        room.on(LivekitClient.RoomEvent.TrackSubscribed, (track, pub, participant) => {
-          if (track.kind === 'audio') {
-            const el = track.attach();
-            el.style.display = 'none';
-            document.body.appendChild(el);
-            setupAgentVisualizer(el);
-          }
+        room.on(LivekitClient.RoomEvent.TrackSubscribed, (track) => {
+          if (track.kind === 'audio') handleAgentAudio(track);
         });
-
         room.on(LivekitClient.RoomEvent.TrackUnsubscribed, (track) => {
           track.detach().forEach(el => el.remove());
         });
-
         room.on(LivekitClient.RoomEvent.Disconnected, () => disconnect());
 
-        room.on(LivekitClient.RoomEvent.DataReceived, (payload, participant, kind, topic) => {
+        room.on(LivekitClient.RoomEvent.DataReceived, (payload, p, k, topic) => {
           if (topic !== 'metrics') return;
           try {
             const d = JSON.parse(new TextDecoder().decode(payload));
-
-            if (d.type === 'stt') {
-              setMetric('m-stt-dur', d.duration_ms, 'ms', 300, 600);
-              setMs('m-stt-audio', d.audio_duration_ms);
-            } else if (d.type === 'tts') {
-              setMetric('m-tts-ttfb', d.ttfb_ms, 'ms', 200, 500);
-              setMetric('m-tts-dur', d.duration_ms, 'ms', 500, 1000);
-              setMs('m-tts-audio', d.audio_duration_ms);
-              setText('m-tts-chars', d.characters);
-            } else if (d.type === 'pipeline') {
-              if (d.transcription_ms) setMetric('m-stt-trans', d.transcription_ms, 'ms', 200, 500);
-              if (d.llm_ttft_ms) setMetric('m-llm-ttft', d.llm_ttft_ms, 'ms', 300, 800);
-              if (d.tts_ttfb_ms) setMetric('m-tts-ttfb', d.tts_ttfb_ms, 'ms', 200, 500);
-              if (d.e2e_ms) setMetric('m-e2e', d.e2e_ms, 'ms', 800, 1500);
+            if (d.type === 'stt') setM('m-stt', d.duration_ms, 300, 600);
+            else if (d.type === 'tts') setM('m-tts', d.ttfb_ms, 200, 500);
+            else if (d.type === 'lipsync') queueLipsync(d);
+            else if (d.type === 'pipeline') {
+              if (d.llm_ttft_ms) setM('m-llm', d.llm_ttft_ms, 300, 800);
+              if (d.tts_ttfb_ms) setM('m-tts', d.tts_ttfb_ms, 200, 500);
+              if (d.e2e_ms) setM('m-e2e', d.e2e_ms, 800, 1500);
+              if (d.transcription_ms) setM('m-stt', d.transcription_ms, 200, 500);
             }
           } catch {}
         });
@@ -377,188 +558,250 @@
             if (!seg.text) continue;
             const isAgent = participant?.identity !== 'user';
             const role = isAgent ? 'agent' : 'user';
-            const existingEl = document.getElementById('seg-' + seg.id);
-            if (existingEl) {
-              existingEl.querySelector('.text').textContent = seg.text;
-            } else {
-              addTranscript(role, seg.text, seg.id);
+
+            // Auto mood + gesture from Lisa's responses
+            if (isAgent && head) {
+              const mood = detectMood(seg.text);
+              if (mood) setMood(mood);
+              const gesture = detectGesture(seg.text);
+              if (gesture) doGesture(gesture);
             }
+
+            const el = document.getElementById('seg-' + seg.id);
+            if (el) el.querySelector('.t').textContent = seg.text;
+            else addMsg(role, seg.text, seg.id);
           }
         });
 
-        statusEl.textContent = 'Connecting to room...';
         await room.connect(data.url, data.token);
-        const selectedDeviceId = micSelect.value;
         await room.localParticipant.setMicrophoneEnabled(true, {
-          deviceId: selectedDeviceId ? { exact: selectedDeviceId } : undefined,
+          deviceId: micSelect.value ? { exact: micSelect.value } : undefined,
         });
 
-        // Set up mic visualizer
-        setupMicVisualizer();
-
         connected = true;
-        btn.className = 'connected';
+        btn.className = 'connect-btn connected';
         btn.textContent = 'Disconnect';
-        statusEl.textContent = 'Connected — speak to the agent';
-        document.getElementById('chatPanel').classList.add('visible');
-        startVisualizerLoop();
-
+        dot.className = 'brand-dot';
+        statusEl.textContent = 'Connected — speak to Lisa';
       } catch (err) {
-        btn.className = '';
+        btn.className = 'connect-btn';
         btn.textContent = 'Connect';
         statusEl.textContent = 'Error: ' + err.message;
-        console.error(err);
       }
     }
 
     function disconnect() {
       if (room) { room.disconnect(); room = null; }
-      if (animationId) cancelAnimationFrame(animationId);
-      if (audioContext) audioContext.close();
-      audioContext = null;
-      agentAnalyser = null;
-      micAnalyser = null;
       connected = false;
-      btn.className = '';
+      btn.className = 'connect-btn';
       btn.textContent = 'Connect';
-      statusEl.textContent = 'Disconnected';
-      document.getElementById('chatPanel').classList.remove('visible');
-      // Clear canvas
-      const w = canvas.width / window.devicePixelRatio;
-      const h = canvas.height / window.devicePixelRatio;
-      ctx.clearRect(0, 0, w, h);
+      dot.className = 'brand-dot offline';
+      statusEl.textContent = '';
+      lipSyncTimers.forEach(t => clearTimeout(t));
+      lipSyncTimers = [];
+      lipsyncQueue = [];
+      if (agentAudioCtx) { try { agentAudioCtx.close(); } catch {} agentAudioCtx = null; }
+      agentAnalyser = null;
+      if (head) {
+        head.setValue('jawOpen', 0);
+        allVis.forEach(v => head.setValue('viseme_' + v, 0));
+      }
     }
 
-    function setupAgentVisualizer(audioEl) {
-      if (!audioContext) audioContext = new AudioContext();
-      const source = audioContext.createMediaElementSource(audioEl);
-      agentAnalyser = audioContext.createAnalyser();
+    // ── Lip sync ──
+    let lipSyncTimers = [];
+    let lipsyncQueue = []; // queued lipsync data waiting for audio
+    let agentAudioCtx = null;
+    let agentAnalyser = null;
+    let waitingForAudio = false;
+
+    const charViseme = {
+      'a':'aa','e':'E','i':'I','o':'O','u':'U',
+      'b':'PP','p':'PP','m':'PP',
+      'f':'FF','v':'FF',
+      't':'DD','d':'DD','n':'nn','l':'nn',
+      's':'SS','z':'SS','c':'SS',
+      'r':'RR','k':'kk','g':'kk',
+      'w':'U','y':'I','h':'sil',
+    };
+    const allVis = ['sil','PP','FF','TH','DD','kk','CH','SS','nn','RR','aa','E','I','O','U'];
+
+    function handleAgentAudio(track) {
+      const el = track.attach();
+      el.style.display = 'none';
+      document.body.appendChild(el);
+
+      if (!head) return;
+
+      // Monitor audio to drive lipsync in real-time
+      const stream = new MediaStream([track.mediaStreamTrack]);
+      agentAudioCtx = new AudioContext();
+      const source = agentAudioCtx.createMediaStreamSource(stream);
+      agentAnalyser = agentAudioCtx.createAnalyser();
       agentAnalyser.fftSize = 256;
-      agentAnalyser.smoothingTimeConstant = 0.7;
+      agentAnalyser.smoothingTimeConstant = 0.3;
       source.connect(agentAnalyser);
-      agentAnalyser.connect(audioContext.destination);
-    }
 
-    function setupMicVisualizer() {
-      if (!audioContext) audioContext = new AudioContext();
-      navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
-        const source = audioContext.createMediaStreamSource(stream);
-        micAnalyser = audioContext.createAnalyser();
-        micAnalyser.fftSize = 256;
-        micAnalyser.smoothingTimeConstant = 0.7;
-        source.connect(micAnalyser);
-        // Don't connect to destination (would cause feedback)
-      }).catch(() => {});
-    }
+      const freqData = new Uint8Array(agentAnalyser.frequencyBinCount);
 
-    function startVisualizerLoop() {
-      const agentData = new Uint8Array(128);
-      const micData = new Uint8Array(128);
+      // State for continuous lipsync playback
+      let currentData = null;    // current lipsync being played
+      let playStartTime = 0;     // when audio started (performance.now)
+      let wordIdx = 0;           // current word index
+      let charIdx = 0;           // current char within word
+      let lastCharTime = 0;
 
-      function draw() {
-        animationId = requestAnimationFrame(draw);
+      function tick() {
+        if (!connected) return;
+        requestAnimationFrame(tick);
+        if (!head) return;
 
-        const w = canvas.parentElement.getBoundingClientRect().width;
-        const h = canvas.parentElement.getBoundingClientRect().height;
+        agentAnalyser.getByteFrequencyData(freqData);
+        let sum = 0;
+        for (let i = 2; i < 30; i++) sum += freqData[i];
+        const level = sum / 28 / 255;
 
-        // Reset transform and clear
-        ctx.setTransform(window.devicePixelRatio, 0, 0, window.devicePixelRatio, 0, 0);
-        ctx.clearRect(0, 0, w, h);
+        const isSpeaking = level > 0.015;
 
-        // Get frequency data
-        let agentLevel = 0;
-        let micLevel = 0;
+        if (isSpeaking) {
+          // Pick up new lipsync data from queue if we need it
+          if (!currentData && lipsyncQueue.length > 0) {
+            currentData = lipsyncQueue.shift();
+            playStartTime = performance.now();
+            wordIdx = 0;
+            charIdx = 0;
+            lastCharTime = 0;
+          }
 
-        if (agentAnalyser) {
-          agentAnalyser.getByteFrequencyData(agentData);
-          for (let i = 0; i < agentData.length; i++) agentLevel += agentData[i];
-          agentLevel = agentLevel / agentData.length / 255;
+          if (currentData) {
+            const elapsed = performance.now() - playStartTime;
+            const { words, wtimes, wdurations } = currentData;
+
+            // Advance to the correct word based on elapsed time
+            while (wordIdx < words.length && elapsed > wtimes[wordIdx] + wdurations[wordIdx]) {
+              wordIdx++;
+              charIdx = 0;
+            }
+
+            if (wordIdx < words.length) {
+              const word = words[wordIdx].toLowerCase().replace(/[^a-z]/g, '');
+              const wStart = wtimes[wordIdx];
+              const wDur = wdurations[wordIdx];
+
+              if (word.length > 0) {
+                const charDur = wDur / word.length;
+                const wordElapsed = elapsed - wStart;
+                const targetChar = Math.min(Math.floor(wordElapsed / charDur), word.length - 1);
+
+                if (targetChar >= 0 && targetChar !== charIdx) {
+                  charIdx = targetChar;
+                }
+
+                const ch = word[Math.max(0, charIdx)] || '';
+                const vis = charViseme[ch] || 'sil';
+
+                allVis.forEach(v => head.setValue('viseme_' + v, 0));
+                head.setValue('viseme_' + vis, 0.35);
+                head.setValue('jawOpen', Math.min(level * 2, 0.3));
+              }
+            } else {
+              // Finished this lipsync data
+              currentData = null;
+            }
+          } else {
+            // No lipsync data — simple jaw movement from audio
+            head.setValue('jawOpen', Math.min(level * 1.5, 0.25));
+          }
+        } else {
+          // Silent
+          head.setValue('jawOpen', 0);
+          allVis.forEach(v => head.setValue('viseme_' + v, 0));
+
+          // If we were playing lipsync and audio stopped, check if done
+          if (currentData) {
+            const elapsed = performance.now() - playStartTime;
+            const { wtimes, wdurations } = currentData;
+            const lastEnd = wtimes[wtimes.length - 1] + wdurations[wdurations.length - 1];
+            if (elapsed > lastEnd + 300) {
+              currentData = null;
+            }
+          }
         }
-
-        if (micAnalyser) {
-          micAnalyser.getByteFrequencyData(micData);
-          for (let i = 0; i < micData.length; i++) micLevel += micData[i];
-          micLevel = micLevel / micData.length / 255;
-        }
-
-        const time = performance.now() / 1000;
-        const cx = w / 2;
-        const cy = h / 2;
-
-        // Draw agent wave (green, center)
-        drawWave(cx, cy, w, h, agentLevel, time, '#22c55e', 0.4, 3);
-        drawWave(cx, cy, w, h, agentLevel, time, '#16a34a', 0.25, 2);
-
-        // Draw mic wave (blue, subtle)
-        drawWave(cx, cy, w, h, micLevel, time * 1.3, '#3b82f6', 0.2, 2);
       }
-
-      draw();
+      tick();
     }
 
-    function drawWave(cx, cy, w, h, level, time, color, baseAlpha, lineWidth) {
-      const numPoints = 80;
-      const amplitude = Math.max(2, level * h * 0.45);
-
-      ctx.beginPath();
-      ctx.strokeStyle = color;
-      ctx.lineWidth = lineWidth;
-      ctx.globalAlpha = baseAlpha + level * 0.6;
-
-      for (let i = 0; i <= numPoints; i++) {
-        const x = (i / numPoints) * w;
-        const normX = (i / numPoints) * 2 - 1; // -1 to 1
-
-        // Envelope: fade out at edges
-        const envelope = 1 - normX * normX;
-
-        // Multiple sine waves for organic feel
-        const y = cy
-          + Math.sin(normX * 4 + time * 3) * amplitude * envelope * 0.5
-          + Math.sin(normX * 7 - time * 2.5) * amplitude * envelope * 0.3
-          + Math.sin(normX * 11 + time * 4) * amplitude * envelope * 0.2;
-
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-      }
-
-      ctx.stroke();
-      ctx.globalAlpha = 1;
+    function queueLipsync(data) {
+      lipsyncQueue.push(data);
     }
 
-    function addTranscript(role, text, segId) {
+    // ── Helpers ──
+    function addMsg(role, text, segId) {
+      if (emptyState) emptyState.remove();
       const div = document.createElement('div');
       if (segId) div.id = 'seg-' + segId;
       div.className = 'msg ' + role;
-      const av = role === 'user' ? 'U' : 'A';
-      div.innerHTML = `<span class="avatar">${av}</span><span class="text">${text}</span>`;
+      div.innerHTML = `<span class="av">${role === 'user' ? 'U' : 'L'}</span><span class="t">${text}</span>`;
       transcript.appendChild(div);
       transcript.scrollTop = transcript.scrollHeight;
     }
 
-    function clearChat() {
-      transcript.innerHTML = '';
+    window.clearChat = () => {
+      transcript.innerHTML = '<div class="chat-empty" id="emptyState">Start a conversation with Lisa</div>';
+    };
+
+    // ── Avatar controls ──
+    window.setMood = (mood) => {
+      if (!head) return;
+      try { head.setMood(mood); } catch (e) { console.warn('setMood:', e); }
+      // Update active button
+      document.querySelectorAll('.ctrl-group:first-child .ctrl-btn').forEach(b => {
+        b.classList.toggle('active', b.textContent.toLowerCase() === mood);
+      });
+    };
+
+    window.doGesture = (name) => {
+      if (!head) return;
+      try { head.playGesture(name, 3, false, 1000); } catch (e) { console.warn('gesture:', e); }
+    };
+
+    window.setAvatarView = (view) => {
+      if (!head) return;
+      try { head.setView(view); } catch (e) { console.warn('setView:', e); }
+      document.querySelectorAll('.ctrl-group:last-child .ctrl-btn').forEach(b => {
+        b.classList.toggle('active', b.textContent.toLowerCase() === view ||
+          (b.textContent === 'Face' && view === 'head'));
+      });
+    };
+
+    // Auto mood from conversation context
+    function detectMood(text) {
+      const t = text.toLowerCase();
+      if (/\b(love|heart|sweet|cute|beautiful|amazing|wonderful)\b/.test(t)) return 'love';
+      if (/\b(sorry|sad|unfortunately|bad news|miss you|lonely)\b/.test(t)) return 'sad';
+      if (/\b(angry|annoyed|frustrated|hate|terrible|awful)\b/.test(t)) return 'angry';
+      if (/\b(afraid|scary|worried|nervous|anxious)\b/.test(t)) return 'fear';
+      if (/\b(great|awesome|happy|nice|good|welcome|hello|hi|hey|thanks|thank)\b/.test(t)) return 'happy';
+      if (/\b(bye|goodbye|goodnight|sleep|tired)\b/.test(t)) return 'sleep';
+      return null;
     }
 
-    function setMetric(id, val, suffix, goodT, okT) {
-      const el = document.getElementById(id);
-      if (!el || val == null) return;
-      el.textContent = val + suffix;
-      el.className = 'metrics-value ' + (val <= goodT ? 'good' : val <= okT ? 'ok' : 'slow');
+    // Auto gesture from conversation
+    function detectGesture(text) {
+      const t = text.toLowerCase();
+      if (/\b(don't know|not sure|no idea|maybe)\b/.test(t)) return 'shrug';
+      if (/\b(yes|correct|right|exactly|perfect|sure)\b/.test(t)) return 'thumbup';
+      if (/\b(hi|hello|hey|wave|bye|goodbye)\b/.test(t)) return 'handup';
+      if (/\b(ok|okay|fine|alright|got it)\b/.test(t)) return 'ok';
+      if (/\b(thank|thanks|grateful|appreciate)\b/.test(t)) return 'namaste';
+      return null;
     }
 
-    function setMs(id, val) {
+    function setM(id, val, g, o) {
       const el = document.getElementById(id);
       if (!el || val == null) return;
-      el.textContent = val >= 1000 ? (val / 1000).toFixed(1) + 's' : val + 'ms';
-      el.className = 'metrics-value';
-    }
-
-    function setText(id, val) {
-      const el = document.getElementById(id);
-      if (!el || val == null) return;
-      el.textContent = val;
-      el.className = 'metrics-value';
+      el.textContent = val + 'ms';
+      el.className = 'metric-value ' + (val <= g ? 'good' : val <= o ? 'ok' : 'slow');
     }
   </script>
 </body>
