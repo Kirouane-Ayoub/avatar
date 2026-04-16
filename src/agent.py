@@ -52,6 +52,15 @@ class VoiceAgent(Agent):
 async def entrypoint(ctx):
     await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
 
+    def _publish(data):
+        asyncio.ensure_future(
+            ctx.room.local_participant.publish_data(
+                payload=json.dumps(data),
+                reliable=True,
+                topic="metrics",
+            )
+        )
+
     session = AgentSession(
         vad=silero.VAD.load(),
         stt=openai.STT(
@@ -70,18 +79,15 @@ async def entrypoint(ctx):
                 base_url=TTS_URL,
                 model=TTS_MODEL,
                 voice=TTS_VOICE,
+                on_timestamps=lambda ts: _publish({
+                    "type": "lipsync",
+                    "words": [t["word"] for t in ts],
+                    "wtimes": [int(t["start_time"] * 1000) for t in ts],
+                    "wdurations": [int((t["end_time"] - t["start_time"]) * 1000) for t in ts],
+                }),
             )
         ),
     )
-
-    def _publish(data):
-        asyncio.ensure_future(
-            ctx.room.local_participant.publish_data(
-                payload=json.dumps(data),
-                reliable=True,
-                topic="metrics",
-            )
-        )
 
     @session.on("conversation_item_added")
     def on_conversation_item(event):
