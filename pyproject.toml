@@ -14,8 +14,6 @@ dependencies = [
     "aiohttp",
 ]
 
-[tool.setuptools.packages.find]
-where = ["src"]
-
 [tool.setuptools]
-py-modules = []
+py-modules = ["agent", "kokoro_tts", "orpheus_tts", "gen_token"]
+package-dir = {"" = "src"}
