@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Voice Agent</title>
+  <script src="https://cdn.jsdelivr.net/npm/livekit-client@2/dist/livekit-client.umd.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0a0a0a;
+      color: #e5e5e5;
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .container {
+      text-align: center;
+      max-width: 480px;
+      width: 100%;
+      padding: 2rem;
+    }
+    h1 {
+      font-size: 1.5rem;
+      margin-bottom: 0.5rem;
+      color: #fff;
+    }
+    .subtitle {
+      font-size: 0.85rem;
+      color: #888;
+      margin-bottom: 2rem;
+    }
+    #btn {
+      width: 120px;
+      height: 120px;
+      border-radius: 50%;
+      border: 2px solid #333;
+      background: #1a1a1a;
+      color: #fff;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 1.5rem;
+      position: relative;
+      z-index: 2;
+    }
+    #btn:hover { border-color: #555; background: #222; }
+    #btn.connected {
+      border-color: #22c55e;
+      background: #052e16;
+      box-shadow: 0 0 30px rgba(34, 197, 94, 0.15);
+    }
+    #btn.connecting {
+      border-color: #eab308;
+      background: #1a1500;
+    }
+    #status {
+      font-size: 0.8rem;
+      color: #666;
+      min-height: 1.2rem;
+    }
+    .mic-select {
+      margin-bottom: 1.5rem;
+    }
+    .mic-select select {
+      background: #1a1a1a;
+      color: #e5e5e5;
+      border: 1px solid #333;
+      border-radius: 6px;
+      padding: 0.4rem 0.6rem;
+      font-size: 0.8rem;
+      width: 100%;
+      max-width: 300px;
+      cursor: pointer;
+      outline: none;
+    }
+    .mic-select select:hover { border-color: #555; }
+    .mic-select label {
+      display: block;
+      font-size: 0.75rem;
+      color: #666;
+      margin-bottom: 0.3rem;
+    }
+
+    /* Wave visualizer */
+    .wave-wrap {
+      position: relative;
+      height: 100px;
+      margin-bottom: 1.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    canvas#waveCanvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    .transcript {
+      margin-top: 1.5rem;
+      padding: 1rem;
+      background: #111;
+      border-radius: 8px;
+      border: 1px solid #222;
+      min-height: 80px;
+      max-height: 200px;
+      overflow-y: auto;
+      text-align: left;
+      font-size: 0.85rem;
+      display: none;
+    }
+    .transcript.visible { display: block; }
+    .msg .text { color: inherit; font-size: inherit; }
+    .msg { margin-bottom: 0.5rem; line-height: 1.4; }
+    .msg.user { color: #93c5fd; }
+    .msg.agent { color: #86efac; }
+    .msg span.label { color: #555; font-size: 0.75rem; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Voice Agent</h1>
+    <p class="subtitle">Qwen 3.5 + Orpheus TTS + Faster Whisper</p>
+    <div class="wave-wrap">
+      <canvas id="waveCanvas"></canvas>
+    </div>
+    <div class="mic-select">
+      <label for="micSelect">Microphone</label>
+      <select id="micSelect"><option value="">Loading devices...</option></select>
+    </div>
+    <button id="btn" onclick="toggle()">Connect</button>
+    <div id="status"></div>
+    <div class="transcript" id="transcript"></div>
+  </div>
+
+  <script>
+    const LIVEKIT_URL = 'ws://localhost';
+    const TOKEN_URL = '/api/token';
+
+    const btn = document.getElementById('btn');
+    const statusEl = document.getElementById('status');
+    const transcript = document.getElementById('transcript');
+    const canvas = document.getElementById('waveCanvas');
+    const ctx = canvas.getContext('2d');
+    const micSelect = document.getElementById('micSelect');
+
+    let room = null;
+    let connected = false;
+    let audioContext = null;
+    let agentAnalyser = null;
+    let micAnalyser = null;
+    let animationId = null;
+
+    // Populate microphone list
+    async function loadMicDevices() {
+      try {
+        // Need a brief getUserMedia call to get device labels
+        const tempStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        tempStream.getTracks().forEach(t => t.stop());
+
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const mics = devices.filter(d => d.kind === 'audioinput');
+        micSelect.innerHTML = '';
+        mics.forEach((mic, i) => {
+          const opt = document.createElement('option');
+          opt.value = mic.deviceId;
+          opt.textContent = mic.label || `Microphone ${i + 1}`;
+          micSelect.appendChild(opt);
+        });
+      } catch {
+        micSelect.innerHTML = '<option value="">Mic access denied</option>';
+      }
+    }
+    loadMicDevices();
+
+    // Refresh list when devices change (plug/unplug)
+    navigator.mediaDevices.addEventListener('devicechange', loadMicDevices);
+
+    // Resize canvas to match CSS size
+    function resizeCanvas() {
+      const rect = canvas.parentElement.getBoundingClientRect();
+      canvas.width = rect.width * window.devicePixelRatio;
+      canvas.height = rect.height * window.devicePixelRatio;
+      ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+    }
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+
+    async function toggle() {
+      if (connected) disconnect();
+      else await connect();
+    }
+
+    async function connect() {
+      btn.className = 'connecting';
+      btn.textContent = 'Connecting...';
+      statusEl.textContent = 'Fetching token...';
+
+      try {
+        const res = await fetch(TOKEN_URL);
+        const data = await res.json();
+
+        room = new LivekitClient.Room({
+          audioCaptureDefaults: { autoGainControl: true, noiseSuppression: true },
+        });
+
+        room.on(LivekitClient.RoomEvent.TrackSubscribed, (track, pub, participant) => {
+          if (track.kind === 'audio') {
+            const el = track.attach();
+            el.style.display = 'none';
+            document.body.appendChild(el);
+            setupAgentVisualizer(el);
+          }
+        });
+
+        room.on(LivekitClient.RoomEvent.TrackUnsubscribed, (track) => {
+          track.detach().forEach(el => el.remove());
+        });
+
+        room.on(LivekitClient.RoomEvent.Disconnected, () => disconnect());
+
+        room.on(LivekitClient.RoomEvent.TranscriptionReceived, (segments, participant) => {
+          for (const seg of segments) {
+            if (!seg.text) continue;
+            const isAgent = participant?.identity !== 'user';
+            const role = isAgent ? 'agent' : 'user';
+            const existingEl = document.getElementById('seg-' + seg.id);
+            if (existingEl) {
+              existingEl.querySelector('.text').textContent = seg.text;
+            } else {
+              addTranscript(role, seg.text, seg.id);
+            }
+          }
+        });
+
+        statusEl.textContent = 'Connecting to room...';
+        await room.connect(LIVEKIT_URL, data.token);
+        const selectedDeviceId = micSelect.value;
+        await room.localParticipant.setMicrophoneEnabled(true, {
+          deviceId: selectedDeviceId ? { exact: selectedDeviceId } : undefined,
+        });
+
+        // Set up mic visualizer
+        setupMicVisualizer();
+
+        connected = true;
+        btn.className = 'connected';
+        btn.textContent = 'Disconnect';
+        statusEl.textContent = 'Connected — speak to the agent';
+        transcript.classList.add('visible');
+        startVisualizerLoop();
+
+      } catch (err) {
+        btn.className = '';
+        btn.textContent = 'Connect';
+        statusEl.textContent = 'Error: ' + err.message;
+        console.error(err);
+      }
+    }
+
+    function disconnect() {
+      if (room) { room.disconnect(); room = null; }
+      if (animationId) cancelAnimationFrame(animationId);
+      if (audioContext) audioContext.close();
+      audioContext = null;
+      agentAnalyser = null;
+      micAnalyser = null;
+      connected = false;
+      btn.className = '';
+      btn.textContent = 'Connect';
+      statusEl.textContent = 'Disconnected';
+      // Clear canvas
+      const w = canvas.width / window.devicePixelRatio;
+      const h = canvas.height / window.devicePixelRatio;
+      ctx.clearRect(0, 0, w, h);
+    }
+
+    function setupAgentVisualizer(audioEl) {
+      if (!audioContext) audioContext = new AudioContext();
+      const source = audioContext.createMediaElementSource(audioEl);
+      agentAnalyser = audioContext.createAnalyser();
+      agentAnalyser.fftSize = 256;
+      agentAnalyser.smoothingTimeConstant = 0.7;
+      source.connect(agentAnalyser);
+      agentAnalyser.connect(audioContext.destination);
+    }
+
+    function setupMicVisualizer() {
+      if (!audioContext) audioContext = new AudioContext();
+      navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+        const source = audioContext.createMediaStreamSource(stream);
+        micAnalyser = audioContext.createAnalyser();
+        micAnalyser.fftSize = 256;
+        micAnalyser.smoothingTimeConstant = 0.7;
+        source.connect(micAnalyser);
+        // Don't connect to destination (would cause feedback)
+      }).catch(() => {});
+    }
+
+    function startVisualizerLoop() {
+      const agentData = new Uint8Array(128);
+      const micData = new Uint8Array(128);
+
+      function draw() {
+        animationId = requestAnimationFrame(draw);
+
+        const w = canvas.parentElement.getBoundingClientRect().width;
+        const h = canvas.parentElement.getBoundingClientRect().height;
+
+        // Reset transform and clear
+        ctx.setTransform(window.devicePixelRatio, 0, 0, window.devicePixelRatio, 0, 0);
+        ctx.clearRect(0, 0, w, h);
+
+        // Get frequency data
+        let agentLevel = 0;
+        let micLevel = 0;
+
+        if (agentAnalyser) {
+          agentAnalyser.getByteFrequencyData(agentData);
+          for (let i = 0; i < agentData.length; i++) agentLevel += agentData[i];
+          agentLevel = agentLevel / agentData.length / 255;
+        }
+
+        if (micAnalyser) {
+          micAnalyser.getByteFrequencyData(micData);
+          for (let i = 0; i < micData.length; i++) micLevel += micData[i];
+          micLevel = micLevel / micData.length / 255;
+        }
+
+        const time = performance.now() / 1000;
+        const cx = w / 2;
+        const cy = h / 2;
+
+        // Draw agent wave (green, center)
+        drawWave(cx, cy, w, h, agentLevel, time, '#22c55e', 0.4, 3);
+        drawWave(cx, cy, w, h, agentLevel, time, '#16a34a', 0.25, 2);
+
+        // Draw mic wave (blue, subtle)
+        drawWave(cx, cy, w, h, micLevel, time * 1.3, '#3b82f6', 0.2, 2);
+      }
+
+      draw();
+    }
+
+    function drawWave(cx, cy, w, h, level, time, color, baseAlpha, lineWidth) {
+      const numPoints = 80;
+      const amplitude = Math.max(2, level * h * 0.45);
+
+      ctx.beginPath();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = lineWidth;
+      ctx.globalAlpha = baseAlpha + level * 0.6;
+
+      for (let i = 0; i <= numPoints; i++) {
+        const x = (i / numPoints) * w;
+        const normX = (i / numPoints) * 2 - 1; // -1 to 1
+
+        // Envelope: fade out at edges
+        const envelope = 1 - normX * normX;
+
+        // Multiple sine waves for organic feel
+        const y = cy
+          + Math.sin(normX * 4 + time * 3) * amplitude * envelope * 0.5
+          + Math.sin(normX * 7 - time * 2.5) * amplitude * envelope * 0.3
+          + Math.sin(normX * 11 + time * 4) * amplitude * envelope * 0.2;
+
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+
+    function addTranscript(role, text, segId) {
+      const div = document.createElement('div');
+      if (segId) div.id = 'seg-' + segId;
+      div.className = 'msg ' + role;
+      div.innerHTML = `<span class="label">${role}:</span> <span class="text">${text}</span>`;
+      transcript.appendChild(div);
+      transcript.scrollTop = transcript.scrollHeight;
+    }
+  </script>
+</body>
+</html>
