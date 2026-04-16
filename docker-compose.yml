@@ -1,0 +1,70 @@
+services:
+  livekit-server:
+    image: livekit/livekit-server
+    container_name: livekit-server
+    ports:
+      - "7880:7880"
+      - "7881:7881"
+      - "7882:7882/udp"
+    volumes:
+      - ./config/livekit.yaml:/livekit.yaml
+    command: --dev --config /livekit.yaml --bind 0.0.0.0
+    networks:
+      - bro-network
+
+  kokoro-tts:
+    image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
+    container_name: kokoro-tts
+    restart: unless-stopped
+    ports:
+      - "8880:8880"
+    networks:
+      - bro-network
+
+  speaches:
+    image: ghcr.io/speaches-ai/speaches:latest-cpu
+    container_name: speaches
+    ports:
+      - "8000:8000"
+    environment:
+      - WHISPER__MODEL=Systran/faster-whisper-base
+      - WHISPER__TTL=0
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    networks:
+      - bro-network
+
+  speaches-model-loader:
+    image: curlimages/curl:latest
+    container_name: speaches-model-loader
+    depends_on:
+      speaches:
+        condition: service_healthy
+    entrypoint: >
+      sh -c 'echo "Downloading Whisper model..." &&
+             curl -X POST "http://speaches:8000/v1/models/Systran/faster-whisper-base" &&
+             echo "Model downloaded successfully."'
+    networks:
+      - bro-network
+
+  agent:
+    build: .
+    container_name: bro-agent
+    env_file: .env
+    depends_on:
+      - livekit-server
+      - kokoro-tts
+      speaches:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    networks:
+      - bro-network
+
+networks:
+  bro-network:
+    driver: bridge
