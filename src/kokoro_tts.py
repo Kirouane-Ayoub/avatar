@@ -1,7 +1,9 @@
-"""Custom LiveKit TTS plugin for Kokoro FastAPI server."""
+"""Custom LiveKit TTS plugin for Kokoro FastAPI server with word timestamps."""
 
 from __future__ import annotations
 
+import base64
+import json
 import logging
 from dataclasses import dataclass
 
@@ -19,6 +21,7 @@ class KokoroConfig:
     model: str = "kokoro"
     voice: str = "af_heart"
     speed: float = 1.0
+    on_timestamps: object = None  # callback(timestamps_list)
 
 
 class KokoroTTS(tts.TTS):
@@ -42,14 +45,6 @@ class KokoroChunkedStream(tts.ChunkedStream):
 
     async def _run(self, output_emitter) -> None:
         config = self._provider._config
-        url = f"{config.base_url}/v1/audio/speech"
-        payload = {
-            "model": config.model,
-            "input": self._text,
-            "voice": config.voice,
-            "response_format": "pcm",
-            "speed": config.speed,
-        }
 
         output_emitter.initialize(
             request_id=utils.shortuuid(),
@@ -60,9 +55,18 @@ class KokoroChunkedStream(tts.ChunkedStream):
 
         logger.info("TTS request: voice=%s text=%r", config.voice, self._text[:80])
 
-        payload["stream"] = True
+        # Use captioned_speech for word timestamps
+        url = f"{config.base_url}/dev/captioned_speech"
+        payload = {
+            "model": config.model,
+            "input": self._text,
+            "voice": config.voice,
+            "response_format": "pcm",
+            "speed": config.speed,
+            "stream": False,
+            "return_timestamps": True,
+        }
 
-        total_bytes = 0
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 url,
@@ -70,14 +74,22 @@ class KokoroChunkedStream(tts.ChunkedStream):
                 timeout=aiohttp.ClientTimeout(total=30),
             ) as resp:
                 resp.raise_for_status()
-                async for chunk in resp.content.iter_chunked(4096):
-                    if chunk:
-                        output_emitter.push(chunk)
-                        total_bytes += len(chunk)
+                data = await resp.json()
 
-        if total_bytes:
-            logger.info("Streamed %d bytes of audio", total_bytes)
-        else:
-            logger.warning("No audio received from Kokoro")
+                # Decode audio from base64
+                audio_b64 = data.get("audio", "")
+                audio_bytes = base64.b64decode(audio_b64)
+                timestamps = data.get("timestamps", [])
+
+                if audio_bytes:
+                    # Send timestamps BEFORE audio so browser has them ready
+                    if config.on_timestamps and timestamps:
+                        config.on_timestamps(timestamps)
+
+                    output_emitter.push(audio_bytes)
+                    logger.info("Got %d bytes audio, %d word timestamps",
+                                len(audio_bytes), len(timestamps))
+                else:
+                    logger.warning("No audio received from Kokoro")
 
         output_emitter.flush()
