@@ -1,5 +1,8 @@
 """LiveKit voice agent: fully local speech-to-speech using Qwen + Kokoro TTS + Faster Whisper."""
 
+import asyncio
+import json
+import logging
 import os
 
 from dotenv import load_dotenv
@@ -16,6 +19,8 @@ from livekit.agents import (
 from livekit.plugins import openai, silero
 from kokoro_tts import KokoroConfig, KokoroTTS
 
+logger = logging.getLogger("voice-agent")
+
 LLM_URL = os.environ["LLM_BASE_URL"]
 LLM_API_KEY = os.environ["LLM_API_KEY"]
 TTS_URL = os.environ["TTS_BASE_URL"]
@@ -26,9 +31,10 @@ TTS_VOICE = os.getenv("TTS_VOICE", "af_heart")
 STT_MODEL = os.getenv("STT_MODEL", "Systran/faster-whisper-base")
 
 SYSTEM_PROMPT = """\
-You are a friendly, helpful voice assistant. Use very short sentences — \
-no more than 5-8 words each. Reply in 1-2 sentences max. Be direct and punchy. \
-This is a real-time voice conversation, so keep it snappy.\
+Your name is Lisa. You are a friendly voice assistant. \
+NEVER repeat or echo the user's words. \
+Always respond with your own original answer. \
+Keep replies to 1-2 short sentences. Be helpful and direct.\
 """
 
 
@@ -53,6 +59,7 @@ async def entrypoint(ctx):
             base_url=LLM_URL,
             api_key=LLM_API_KEY,
             model=LLM_MODEL,
+            extra_body={"chat_template_kwargs": {"enable_thinking": False}},
         ),
         tts=KokoroTTS(
             KokoroConfig(
@@ -62,6 +69,70 @@ async def entrypoint(ctx):
             )
         ),
     )
+
+    def _publish(data):
+        asyncio.ensure_future(
+            ctx.room.local_participant.publish_data(
+                payload=json.dumps(data),
+                reliable=True,
+                topic="metrics",
+            )
+        )
+
+    @session.on("conversation_item_added")
+    def on_conversation_item(event):
+        msg = event.item
+        if not hasattr(msg, "metrics"):
+            return
+        m = msg.metrics
+        if not m:
+            return
+
+        data = {"type": "pipeline"}
+
+        if msg.role == "user":
+            data["transcription_ms"] = round(m.get("transcription_delay", 0) * 1000)
+            data["eot_ms"] = round(m.get("end_of_turn_delay", 0) * 1000)
+        elif msg.role == "assistant":
+            data["llm_ttft_ms"] = round(m.get("llm_node_ttft", 0) * 1000)
+            data["tts_ttfb_ms"] = round(m.get("tts_node_ttfb", 0) * 1000)
+            data["e2e_ms"] = round(m.get("e2e_latency", 0) * 1000)
+        else:
+            return
+
+        logger.info("pipeline: %s", data)
+        _publish(data)
+
+    @session.on("metrics_collected")
+    def on_metrics(event):
+        try:
+            m = event.metrics
+            cls = type(m).__name__
+
+            if cls == "STTMetrics":
+                data = {
+                    "type": "stt",
+                    "duration_ms": round(m.duration * 1000),
+                    "audio_duration_ms": round(m.audio_duration * 1000),
+                    "streamed": m.streamed,
+                }
+                logger.info("stt: %s", data)
+                _publish(data)
+
+            elif cls == "TTSMetrics":
+                data = {
+                    "type": "tts",
+                    "ttfb_ms": round(m.ttfb * 1000),
+                    "duration_ms": round(m.duration * 1000),
+                    "audio_duration_ms": round(m.audio_duration * 1000),
+                    "characters": m.characters_count,
+                    "cancelled": m.cancelled,
+                }
+                logger.info("tts: %s", data)
+                _publish(data)
+
+        except Exception as e:
+            logger.warning("metrics error: %s", e)
 
     await session.start(agent=VoiceAgent(), room=ctx.room)
 
