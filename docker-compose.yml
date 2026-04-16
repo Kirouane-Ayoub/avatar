@@ -56,8 +56,10 @@ services:
     container_name: bro-agent
     env_file: .env
     depends_on:
-      - livekit-server
-      - kokoro-tts
+      livekit-server:
+        condition: service_started
+      kokoro-tts:
+        condition: service_started
       speaches:
         condition: service_healthy
     ports:
