@@ -16,6 +16,22 @@ services:
     restart: unless-stopped
     ports:
       - "8880:8880"
+    environment:
+      # ONNX CPU optimization (4 performance cores on M4 Pro)
+      - ONNX_NUM_THREADS=4
+      - ONNX_INTER_OP_THREADS=2
+      - ONNX_EXECUTION_MODE=parallel
+      - ONNX_OPTIMIZATION_LEVEL=all
+      - ONNX_MEMORY_PATTERN=true
+      - ONNX_ARENA_EXTEND_STRATEGY=kNextPowerOfTwo
+      # Reduce first-chunk latency for streaming
+      - TARGET_MIN_TOKENS=100
+      - TARGET_MAX_TOKENS=150
+      - ABSOLUTE_MAX_TOKENS=300
+      # Skip text normalization overhead
+      - ADVANCED_TEXT_NORMALIZATION=false
+      # Reduce logging overhead
+      - API_LOG_LEVEL=WARNING
     networks:
       - bro-network
 
@@ -25,7 +41,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - WHISPER__MODEL=Systran/faster-whisper-base
+      - WHISPER__MODEL=Systran/faster-whisper-tiny.en
       - WHISPER__TTL=0
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -44,7 +60,7 @@ services:
         condition: service_healthy
     entrypoint: >
       sh -c 'echo "Downloading Whisper model..." &&
-             curl -X POST "http://speaches:8000/v1/models/Systran/faster-whisper-base" &&
+             curl -X POST "http://speaches:8000/v1/models/Systran/faster-whisper-tiny.en" &&
              echo "Model downloaded successfully."'
     networks:
       - bro-network
