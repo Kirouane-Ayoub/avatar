@@ -348,6 +348,190 @@
     .metric-value.ok { color: #eab308; }
     .metric-value.slow { color: #ef4444; }
 
+    /* Camera preview */
+    .cam-preview {
+      position: absolute;
+      bottom: 80px;
+      right: 16px;
+      width: 120px;
+      height: 90px;
+      border-radius: 10px;
+      overflow: hidden;
+      border: 2px solid #27272a;
+      background: #000;
+      display: none;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+      transition: opacity 0.3s;
+    }
+    .cam-preview.visible { display: block; }
+    .cam-preview video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transform: scaleX(-1);
+    }
+    .cam-preview-label {
+      position: absolute;
+      top: 4px;
+      left: 6px;
+      font-size: 0.45rem;
+      color: rgba(255,255,255,0.5);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .cam-preview-dot {
+      position: absolute;
+      top: 5px;
+      right: 6px;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #ef4444;
+      box-shadow: 0 0 6px rgba(239,68,68,0.6);
+      animation: camPulse 2s ease-in-out infinite;
+    }
+    @keyframes camPulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    /* ── Setup Overlay ── */
+    .setup-overlay {
+      position: fixed;
+      inset: 0;
+      background: #09090b;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: opacity 0.4s, visibility 0.4s;
+    }
+    .setup-overlay.hidden {
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+    }
+    .setup-card {
+      background: #111114;
+      border: 1px solid #1c1c22;
+      border-radius: 16px;
+      padding: 2rem 2.5rem;
+      width: 420px;
+      max-width: 90vw;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    }
+    .setup-card h2 {
+      font-size: 1.2rem;
+      font-weight: 600;
+      color: #fff;
+      margin-bottom: 0.3rem;
+      text-align: center;
+    }
+    .setup-card .setup-sub {
+      font-size: 0.7rem;
+      color: #52525b;
+      text-align: center;
+      margin-bottom: 1.8rem;
+    }
+    .setup-field {
+      margin-bottom: 1.2rem;
+    }
+    .setup-field label {
+      display: block;
+      font-size: 0.65rem;
+      color: #52525b;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      font-weight: 600;
+      margin-bottom: 0.35rem;
+    }
+    .setup-field select {
+      width: 100%;
+      background: #18181b;
+      color: #a1a1aa;
+      border: 1px solid #27272a;
+      border-radius: 8px;
+      padding: 0.5rem 0.7rem;
+      font-size: 0.78rem;
+      font-family: inherit;
+      outline: none;
+    }
+    .setup-field select:hover { border-color: #3f3f46; }
+    .setup-cam-preview {
+      width: 100%;
+      height: 160px;
+      border-radius: 10px;
+      overflow: hidden;
+      background: #0a0a0a;
+      border: 1px solid #27272a;
+      margin-top: 0.5rem;
+      position: relative;
+    }
+    .setup-cam-preview video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transform: scaleX(-1);
+    }
+    .setup-cam-placeholder {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #27272a;
+      font-size: 0.7rem;
+    }
+    .setup-cam-toggle {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      margin-top: 0.5rem;
+    }
+    .setup-cam-toggle label { margin-bottom: 0; }
+    .toggle-switch {
+      position: relative;
+      width: 36px;
+      height: 20px;
+      cursor: pointer;
+    }
+    .toggle-switch input { display: none; }
+    .toggle-track {
+      position: absolute;
+      inset: 0;
+      background: #27272a;
+      border-radius: 10px;
+      transition: background 0.2s;
+    }
+    .toggle-switch input:checked + .toggle-track { background: #22c55e; }
+    .toggle-thumb {
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 16px;
+      height: 16px;
+      background: #fff;
+      border-radius: 50%;
+      transition: left 0.2s;
+    }
+    .toggle-switch input:checked ~ .toggle-thumb { left: 18px; }
+    .setup-start {
+      width: 100%;
+      padding: 0.6rem;
+      border: none;
+      border-radius: 10px;
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      color: #fff;
+      font-size: 0.85rem;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      margin-top: 0.5rem;
+      transition: opacity 0.2s, transform 0.1s;
+    }
+    .setup-start:hover { opacity: 0.9; }
+    .setup-start:active { transform: scale(0.98); }
+
     /* Responsive */
     @media (max-width: 900px) {
       .app { flex-direction: column; }
@@ -363,10 +547,47 @@
   </style>
 </head>
 <body>
-  <div class="app">
+  <!-- Setup Overlay -->
+  <div class="setup-overlay" id="setupOverlay">
+    <div class="setup-card">
+      <h2>Welcome to Lisa</h2>
+      <p class="setup-sub">Configure your devices before starting</p>
+
+      <div class="setup-field">
+        <label>Microphone</label>
+        <select id="setupMic"><option>Loading...</option></select>
+      </div>
+
+      <div class="setup-field">
+        <label>Camera</label>
+        <select id="setupCam"><option>Loading...</option></select>
+        <div class="setup-cam-toggle">
+          <label class="toggle-switch">
+            <input type="checkbox" id="setupCamToggle">
+            <span class="toggle-track"></span>
+            <span class="toggle-thumb"></span>
+          </label>
+          <span style="font-size:0.68rem; color:#71717a;">Enable camera</span>
+        </div>
+        <div class="setup-cam-preview" id="setupCamPreview">
+          <span class="setup-cam-placeholder" id="setupCamPlaceholder">Camera off</span>
+          <video id="setupCamVideo" autoplay muted playsinline></video>
+        </div>
+      </div>
+
+      <button class="setup-start" id="setupStart">Start Session</button>
+    </div>
+  </div>
+
+  <div class="app" style="display:none" id="mainApp">
     <!-- Left: Avatar -->
     <div class="avatar-side">
       <div id="avatar"><span id="avatarMsg">Click Connect to start</span></div>
+      <div class="cam-preview" id="camPreview">
+        <video id="camVideo" autoplay muted playsinline></video>
+        <span class="cam-preview-label">You</span>
+        <span class="cam-preview-dot"></span>
+      </div>
       <div class="avatar-label">
         <h2>Lisa</h2>
         <p>AI Voice Assistant</p>
@@ -384,11 +605,6 @@
       </div>
 
       <div class="status-bar" id="status"></div>
-
-      <div class="mic-bar">
-        <label>Mic</label>
-        <select id="micSelect"><option>Loading...</option></select>
-      </div>
 
       <div class="avatar-controls">
         <div class="ctrl-group">
@@ -456,10 +672,19 @@
     const statusEl = document.getElementById('status');
     const transcript = document.getElementById('transcript');
     const emptyState = document.getElementById('emptyState');
-    const micSelect = document.getElementById('micSelect');
     const avatarMsg = document.getElementById('avatarMsg');
 
+    // Setup elements
+    const setupOverlay = document.getElementById('setupOverlay');
+    const setupMic = document.getElementById('setupMic');
+    const setupCam = document.getElementById('setupCam');
+    const setupCamToggle = document.getElementById('setupCamToggle');
+    const setupCamVideo = document.getElementById('setupCamVideo');
+    const setupCamPlaceholder = document.getElementById('setupCamPlaceholder');
+
     let room = null, connected = false, head = null;
+    let selectedMicId = null, selectedCamId = null, cameraWanted = false;
+    let setupPreviewStream = null;
 
     // ── Avatar ──
     async function loadAvatar() {
@@ -491,30 +716,99 @@
       }
     }
 
-    let avatarLoaded = false;
-    document.getElementById('btn').addEventListener('click', async () => {
-      if (!avatarLoaded) {
-        avatarLoaded = true;
-        await loadAvatar();
-      }
-    }, { once: true });
 
-    // ── Mic ──
-    async function loadMics() {
+
+    // ── Setup: load devices into popup ──
+    async function loadSetupDevices() {
       try {
-        const s = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const s = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
         s.getTracks().forEach(t => t.stop());
-        const devs = await navigator.mediaDevices.enumerateDevices();
-        micSelect.innerHTML = '';
-        devs.filter(d => d.kind === 'audioinput').forEach((m, i) => {
-          const o = document.createElement('option');
-          o.value = m.deviceId;
-          o.textContent = m.label || `Mic ${i+1}`;
-          micSelect.appendChild(o);
-        });
-      } catch { micSelect.innerHTML = '<option>No mic</option>'; }
+      } catch {
+        try {
+          const s = await navigator.mediaDevices.getUserMedia({ audio: true });
+          s.getTracks().forEach(t => t.stop());
+        } catch {}
+      }
+
+      const devs = await navigator.mediaDevices.enumerateDevices();
+
+      setupMic.innerHTML = '';
+      devs.filter(d => d.kind === 'audioinput').forEach((m, i) => {
+        const o = document.createElement('option');
+        o.value = m.deviceId;
+        o.textContent = m.label || `Microphone ${i+1}`;
+        setupMic.appendChild(o);
+      });
+
+      setupCam.innerHTML = '';
+      devs.filter(d => d.kind === 'videoinput').forEach((c, i) => {
+        const o = document.createElement('option');
+        o.value = c.deviceId;
+        o.textContent = c.label || `Camera ${i+1}`;
+        setupCam.appendChild(o);
+      });
     }
-    loadMics();
+    loadSetupDevices();
+
+    // Camera preview toggle in setup
+    setupCamToggle.addEventListener('change', async () => {
+      if (setupCamToggle.checked) {
+        try {
+          const deviceId = setupCam.value;
+          setupPreviewStream = await navigator.mediaDevices.getUserMedia({
+            video: deviceId ? { deviceId: { exact: deviceId } } : true,
+          });
+          setupCamVideo.srcObject = setupPreviewStream;
+          setupCamPlaceholder.style.display = 'none';
+        } catch (err) {
+          setupCamToggle.checked = false;
+          setupCamPlaceholder.textContent = 'Camera error';
+        }
+      } else {
+        if (setupPreviewStream) {
+          setupPreviewStream.getTracks().forEach(t => t.stop());
+          setupPreviewStream = null;
+        }
+        setupCamVideo.srcObject = null;
+        setupCamPlaceholder.style.display = 'flex';
+        setupCamPlaceholder.textContent = 'Camera off';
+      }
+    });
+
+    // Switch camera preview when selection changes
+    setupCam.addEventListener('change', () => {
+      if (setupCamToggle.checked) {
+        setupCamToggle.checked = false;
+        setupCamToggle.dispatchEvent(new Event('change'));
+        setTimeout(() => {
+          setupCamToggle.checked = true;
+          setupCamToggle.dispatchEvent(new Event('change'));
+        }, 100);
+      }
+    });
+
+    // Start session button
+    document.getElementById('setupStart').addEventListener('click', async () => {
+      selectedMicId = setupMic.value;
+      selectedCamId = setupCam.value;
+      cameraWanted = setupCamToggle.checked;
+
+      // Stop preview stream
+      if (setupPreviewStream) {
+        setupPreviewStream.getTracks().forEach(t => t.stop());
+        setupPreviewStream = null;
+      }
+
+      // Fade out setup, show main app
+      setupOverlay.classList.add('hidden');
+      document.getElementById('mainApp').style.display = 'flex';
+
+      // Load avatar (now after user gesture — no AudioContext issue)
+      await loadAvatar();
+
+      // Auto-connect
+      await connect();
+    });
 
     // ── Connection ──
     window.toggle = () => { connected ? disconnect() : connect(); };
@@ -575,14 +869,27 @@
 
         await room.connect(data.url, data.token);
         await room.localParticipant.setMicrophoneEnabled(true, {
-          deviceId: micSelect.value ? { exact: micSelect.value } : undefined,
+          deviceId: selectedMicId ? { exact: selectedMicId } : undefined,
         });
+
+        // Enable camera if user chose to in setup
+        if (cameraWanted) {
+          await room.localParticipant.setCameraEnabled(true, {
+            deviceId: selectedCamId ? { exact: selectedCamId } : undefined,
+          });
+          // Show camera preview on avatar side
+          const camTrack = room.localParticipant.getTrackPublication('camera');
+          if (camTrack && camTrack.track) {
+            document.getElementById('camVideo').srcObject = new MediaStream([camTrack.track.mediaStreamTrack]);
+          }
+          document.getElementById('camPreview').classList.add('visible');
+        }
 
         connected = true;
         btn.className = 'connect-btn connected';
         btn.textContent = 'Disconnect';
         dot.className = 'brand-dot';
-        statusEl.textContent = 'Connected — speak to Lisa';
+        statusEl.textContent = cameraWanted ? 'Connected — Lisa can see and hear you' : 'Connected — speak to Lisa';
       } catch (err) {
         btn.className = 'connect-btn';
         btn.textContent = 'Connect';
@@ -606,6 +913,7 @@
         head.setValue('jawOpen', 0);
         allVis.forEach(v => head.setValue('viseme_' + v, 0));
       }
+      document.getElementById('camPreview').classList.remove('visible');
     }
 
     // ── Lip sync ──
@@ -745,6 +1053,7 @@
       transcript.appendChild(div);
       transcript.scrollTop = transcript.scrollHeight;
     }
+
 
     window.clearChat = () => {
       transcript.innerHTML = '<div class="chat-empty" id="emptyState">Start a conversation with Lisa</div>';
