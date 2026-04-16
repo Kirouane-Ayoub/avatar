@@ -18,6 +18,7 @@ from livekit.agents import (
 )
 from livekit.plugins import openai, silero
 from kokoro_tts import KokoroConfig, KokoroTTS
+from tools import ALL_TOOLS
 
 logger = logging.getLogger("voice-agent")
 
@@ -34,7 +35,9 @@ SYSTEM_PROMPT = """\
 Your name is Lisa. You are a friendly voice assistant. \
 NEVER repeat or echo the user's words. \
 Always respond with your own original answer. \
-Keep replies to 1-2 short sentences. Be helpful and direct.\
+Keep replies to 1-2 short sentences. Be helpful and direct. \
+You have tools available — use them when the user asks for the time, \
+weather, math, dice rolls, coin flips, or random numbers.\
 """
 
 
@@ -42,6 +45,7 @@ class VoiceAgent(Agent):
     def __init__(self) -> None:
         super().__init__(
             instructions=SYSTEM_PROMPT,
+            tools=ALL_TOOLS,
         )
 
 
