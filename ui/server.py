@@ -11,6 +11,7 @@ from livekit.api import AccessToken, VideoGrants
 load_dotenv()
 
 LIVEKIT_URL = os.environ["LIVEKIT_URL"]
+LIVEKIT_EXTERNAL_URL = os.getenv("LIVEKIT_EXTERNAL_URL", LIVEKIT_URL)
 LIVEKIT_API_KEY = os.environ["LIVEKIT_API_KEY"]
 LIVEKIT_API_SECRET = os.environ["LIVEKIT_API_SECRET"]
 PORT = int(os.getenv("UI_PORT", "3000"))
@@ -29,7 +30,7 @@ class Handler(SimpleHTTPRequestHandler):
                 .with_grants(VideoGrants(room_join=True, room="test-room"))
                 .to_jwt()
             )
-            payload = {"token": token, "url": LIVEKIT_URL}
+            payload = {"token": token, "url": LIVEKIT_EXTERNAL_URL}
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
