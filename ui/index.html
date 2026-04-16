@@ -127,7 +127,7 @@
 <body>
   <div class="container">
     <h1>Voice Agent</h1>
-    <p class="subtitle">Qwen 3.5 + Orpheus TTS + Faster Whisper</p>
+    <p class="subtitle">Qwen 3.5 + Kokoro TTS + Faster Whisper</p>
     <div class="wave-wrap">
       <canvas id="waveCanvas"></canvas>
     </div>
@@ -141,7 +141,6 @@
   </div>
 
   <script>
-    const LIVEKIT_URL = 'ws://localhost';
     const TOKEN_URL = '/api/token';
 
     const btn = document.getElementById('btn');
@@ -241,7 +240,7 @@
         });
 
         statusEl.textContent = 'Connecting to room...';
-        await room.connect(LIVEKIT_URL, data.token);
+        await room.connect(data.url, data.token);
         const selectedDeviceId = micSelect.value;
         await room.localParticipant.setMicrophoneEnabled(true, {
           deviceId: selectedDeviceId ? { exact: selectedDeviceId } : undefined,
