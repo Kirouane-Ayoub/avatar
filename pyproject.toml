@@ -8,11 +8,13 @@ dependencies = [
     "livekit-plugins-openai>=1.3,<2.0",
     "livekit-plugins-silero>=1.3,<2.0",
     "python-dotenv",
-    "snac",
     "numpy",
     "soundfile",
     "aiohttp",
 ]
+
+[project.optional-dependencies]
+orpheus = ["snac", "torch"]
 
 [tool.setuptools]
 py-modules = ["agent", "kokoro_tts", "orpheus_tts", "gen_token"]
