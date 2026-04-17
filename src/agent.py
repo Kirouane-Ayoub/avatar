@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from livekit import rtc
 from livekit.agents import (
     Agent,
     AgentSession,
@@ -16,7 +17,7 @@ from livekit.agents import (
     WorkerOptions,
     cli,
 )
-from livekit.agents.voice import VoiceActivityVideoSampler
+from livekit.agents.llm import ImageContent
 from livekit.plugins import openai, silero
 from kokoro_tts import KokoroConfig, KokoroTTS
 from tools import ALL_TOOLS
@@ -37,7 +38,8 @@ Your name is Lisa. You are a friendly voice assistant with vision. \
 NEVER repeat or echo the user's words. \
 Always respond with your own original answer. \
 Keep replies to 1-2 short sentences. Be helpful and direct. \
-You can see the user through their camera — describe what you see when asked. \
+When you receive an image from the user's camera, describe what you see if asked. \
+Only mention the camera/image when the user asks about it. \
 You have tools available — use them when the user asks for the time, \
 weather, math, dice rolls, coin flips, or random numbers.\
 """
@@ -49,10 +51,35 @@ class VoiceAgent(Agent):
             instructions=SYSTEM_PROMPT,
             tools=ALL_TOOLS,
         )
+        self._last_frame = None
+
+    def set_frame(self, frame: rtc.VideoFrame):
+        self._last_frame = frame
+
+    async def on_user_turn_completed(self, turn_ctx, new_message):
+        """Inject the latest camera frame into the user's message before LLM processes it."""
+        logger.info("on_user_turn_completed called, has frame: %s", self._last_frame is not None)
+        if self._last_frame is not None:
+            logger.info("Injecting camera frame (%dx%d) into user message",
+                        self._last_frame.width, self._last_frame.height)
+            image = ImageContent(
+                image=self._last_frame,
+                inference_width=512,
+                inference_height=512,
+            )
+            # Always make content a list and append the image
+            if isinstance(new_message.content, list):
+                new_message.content.append(image)
+            elif isinstance(new_message.content, str):
+                new_message.content = [new_message.content, image]
+            else:
+                new_message.content = [image]
+            logger.info("Message content now has %d items", len(new_message.content))
+            # Don't clear — keep sending latest frame on every turn
 
 
 async def entrypoint(ctx):
-    await ctx.connect(auto_subscribe=AutoSubscribe.SUBSCRIBE_ALL)
+    await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
 
     def _publish(data):
         asyncio.ensure_future(
@@ -63,8 +90,9 @@ async def entrypoint(ctx):
             )
         )
 
+    agent = VoiceAgent()
+
     session = AgentSession(
-        video_sampler=VoiceActivityVideoSampler(speaking_fps=1.0, silent_fps=0.5),
         vad=silero.VAD.load(),
         stt=openai.STT(
             base_url=STT_URL,
@@ -91,6 +119,27 @@ async def entrypoint(ctx):
             )
         ),
     )
+
+    # Manually subscribe to video tracks (audio is handled by AUDIO_ONLY)
+    @ctx.room.on("track_published")
+    def on_track_published(publication, participant):
+        if publication.kind == rtc.TrackKind.KIND_VIDEO:
+            logger.info("Video track published by %s, subscribing...", participant.identity)
+            publication.set_subscribed(True)
+
+    @ctx.room.on("track_subscribed")
+    def on_track_subscribed(track, publication, participant):
+        if track.kind == rtc.TrackKind.KIND_VIDEO:
+            logger.info("Video track subscribed from %s", participant.identity)
+            asyncio.ensure_future(process_video(track))
+
+    async def process_video(track):
+        """Continuously capture frames from the user's video track."""
+        try:
+            async for event in rtc.VideoStream(track):
+                agent.set_frame(event.frame)
+        except Exception as e:
+            logger.warning("Video stream ended: %s", e)
 
     @session.on("conversation_item_added")
     def on_conversation_item(event):
@@ -147,7 +196,7 @@ async def entrypoint(ctx):
         except Exception as e:
             logger.warning("metrics error: %s", e)
 
-    await session.start(agent=VoiceAgent(), room=ctx.room)
+    await session.start(agent=agent, room=ctx.room)
 
     await session.generate_reply(
         user_input="Hello!"
