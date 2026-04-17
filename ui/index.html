@@ -264,6 +264,8 @@
       padding: 0.8rem;
       overflow-y: auto;
       min-height: 0;
+      display: flex;
+      flex-direction: column;
     }
     .chat::-webkit-scrollbar { width: 4px; }
     .chat::-webkit-scrollbar-track { background: transparent; }
@@ -271,12 +273,9 @@
 
     .msg {
       display: flex;
-      gap: 0.6rem;
+      gap: 0.5rem;
       margin-bottom: 0.6rem;
-      padding: 0.5rem 0.7rem;
-      border-radius: 8px;
-      font-size: 0.8rem;
-      line-height: 1.5;
+      max-width: 80%;
       animation: msgIn 0.2s ease;
     }
     @keyframes msgIn {
@@ -285,12 +284,26 @@
     }
     .msg:last-child { margin-bottom: 0; }
     .msg.user {
-      background: rgba(59,130,246,0.05);
-      border-left: 2px solid rgba(59,130,246,0.3);
+      align-self: flex-end;
+      flex-direction: row-reverse;
     }
     .msg.agent {
-      background: rgba(34,197,94,0.05);
-      border-left: 2px solid rgba(34,197,94,0.3);
+      align-self: flex-start;
+      flex-direction: row;
+    }
+    .msg .bubble {
+      padding: 0.45rem 0.7rem;
+      border-radius: 12px;
+      font-size: 0.8rem;
+      line-height: 1.5;
+    }
+    .msg.user .bubble {
+      background: #172554;
+      border-bottom-right-radius: 4px;
+    }
+    .msg.agent .bubble {
+      background: #052e16;
+      border-bottom-left-radius: 4px;
     }
     .msg .av {
       flex-shrink: 0;
@@ -301,12 +314,12 @@
       justify-content: center;
       font-size: 0.55rem;
       font-weight: 700;
-      margin-top: 1px;
+      margin-top: auto;
     }
-    .msg.user .av { background: #172554; color: #60a5fa; }
-    .msg.agent .av { background: #052e16; color: #4ade80; }
-    .msg.user .t { color: #93c5fd; }
-    .msg.agent .t { color: #86efac; }
+    .msg.user .av { background: #1e3a5f; color: #60a5fa; }
+    .msg.agent .av { background: #14532d; color: #4ade80; }
+    .msg.user .t { color: #bfdbfe; }
+    .msg.agent .t { color: #bbf7d0; }
 
     /* Empty state */
     .chat-empty {
@@ -627,9 +640,9 @@
         <div class="ctrl-group">
           <span class="ctrl-label">View</span>
           <button class="ctrl-btn" onclick="setAvatarView('head')">Face</button>
-          <button class="ctrl-btn active" onclick="setAvatarView('upper')">Upper</button>
+          <button class="ctrl-btn" onclick="setAvatarView('upper')">Upper</button>
           <button class="ctrl-btn" onclick="setAvatarView('mid')">Mid</button>
-          <button class="ctrl-btn" onclick="setAvatarView('full')">Full</button>
+          <button class="ctrl-btn active" onclick="setAvatarView('full')">Full</button>
         </div>
       </div>
 
@@ -710,6 +723,7 @@
 
         avatarMsg.style.display = 'none';
         head.setMood('happy');
+        head.setView('full');
       } catch (err) {
         console.error('Avatar error:', err);
         avatarMsg.textContent = 'Avatar failed to load';
@@ -904,6 +918,8 @@
       btn.textContent = 'Connect';
       dot.className = 'brand-dot offline';
       statusEl.textContent = '';
+      // Clear chat
+      transcript.innerHTML = '<div class="chat-empty">Start a conversation with Lisa</div>';
       lipSyncTimers.forEach(t => clearTimeout(t));
       lipSyncTimers = [];
       lipsyncQueue = [];
@@ -1045,11 +1061,13 @@
 
     // ── Helpers ──
     function addMsg(role, text, segId) {
-      if (emptyState) emptyState.remove();
+      const empty = document.querySelector('.chat-empty');
+      if (empty) empty.remove();
       const div = document.createElement('div');
       if (segId) div.id = 'seg-' + segId;
       div.className = 'msg ' + role;
-      div.innerHTML = `<span class="av">${role === 'user' ? 'U' : 'L'}</span><span class="t">${text}</span>`;
+      const av = role === 'user' ? 'U' : 'L';
+      div.innerHTML = `<span class="av">${av}</span><div class="bubble"><span class="t">${text}</span></div>`;
       transcript.appendChild(div);
       transcript.scrollTop = transcript.scrollHeight;
     }
