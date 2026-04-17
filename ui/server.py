@@ -2,6 +2,7 @@
 
 import json
 import os
+import uuid
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 
@@ -24,10 +25,11 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/api/token":
+            room_name = f"lisa-{uuid.uuid4().hex[:8]}"
             token = (
                 AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET)
                 .with_identity("user")
-                .with_grants(VideoGrants(room_join=True, room="test-room"))
+                .with_grants(VideoGrants(room_join=True, room=room_name))
                 .to_jwt()
             )
             payload = {"token": token, "url": LIVEKIT_EXTERNAL_URL}
