@@ -18,6 +18,8 @@ from livekit.agents import (
     cli,
 )
 from livekit.agents.llm import ImageContent
+from livekit.agents.utils.images import encode, EncodeOptions, ResizeOptions
+import base64
 from livekit.plugins import openai, silero
 from kokoro_tts import KokoroConfig, KokoroTTS
 from tools import ALL_TOOLS
@@ -51,31 +53,43 @@ class VoiceAgent(Agent):
             instructions=SYSTEM_PROMPT,
             tools=ALL_TOOLS,
         )
-        self._last_frame = None
+        self._last_image_url = None
+        self._frame_count = 0
 
     def set_frame(self, frame: rtc.VideoFrame):
-        self._last_frame = frame
+        """Encode the frame to JPEG immediately so it doesn't go stale."""
+        try:
+            image_bytes = encode(
+                frame,
+                EncodeOptions(
+                    format="JPEG",
+                    resize_options=ResizeOptions(width=512, height=512, strategy="scale_aspect_fit"),
+                ),
+            )
+            self._last_image_url = f"data:image/jpeg;base64,{base64.b64encode(image_bytes).decode()}"
+            self._frame_count += 1
+            if self._frame_count % 30 == 0:
+                logger.info("Video frames captured: %d", self._frame_count)
+        except Exception as e:
+            logger.warning("Failed to encode frame: %s", e)
 
     async def on_user_turn_completed(self, turn_ctx, new_message):
-        """Inject the latest camera frame into the user's message before LLM processes it."""
-        logger.info("on_user_turn_completed called, has frame: %s", self._last_frame is not None)
-        if self._last_frame is not None:
-            logger.info("Injecting camera frame (%dx%d) into user message",
-                        self._last_frame.width, self._last_frame.height)
-            image = ImageContent(
-                image=self._last_frame,
-                inference_width=512,
-                inference_height=512,
-            )
-            # Always make content a list and append the image
-            if isinstance(new_message.content, list):
-                new_message.content.append(image)
-            elif isinstance(new_message.content, str):
-                new_message.content = [new_message.content, image]
-            else:
-                new_message.content = [image]
-            logger.info("Message content now has %d items", len(new_message.content))
-            # Don't clear — keep sending latest frame on every turn
+        """Inject the latest camera frame into the chat context before LLM processes it."""
+        logger.info("on_user_turn_completed called, has image: %s", self._last_image_url is not None)
+        if self._last_image_url is not None:
+            # Remove old images from ALL messages
+            for msg in turn_ctx.items:
+                if hasattr(msg, 'content') and isinstance(msg.content, list):
+                    msg.content = [c for c in msg.content if not isinstance(c, ImageContent)]
+
+            # Append image to the user's text in the new message
+            image = ImageContent(image=self._last_image_url)
+            text = new_message.text_content or ""
+            new_message.content = [
+                "[Camera frame attached] " + text,
+                image,
+            ]
+            logger.info("Injected image into message, text: %s", text[:50])
 
 
 async def entrypoint(ctx):
