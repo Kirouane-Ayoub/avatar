@@ -107,6 +107,8 @@ async def entrypoint(ctx):
     agent = VoiceAgent()
 
     session = AgentSession(
+        turn_detection=openai.turn_detection.EOUModel(),
+        min_endpointing_delay=0.3,
         vad=silero.VAD.load(),
         stt=openai.STT(
             base_url=STT_URL,
