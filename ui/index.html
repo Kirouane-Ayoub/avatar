@@ -762,12 +762,16 @@
         glb: './brunette.glb',
         body: 'F',
         mood: 'happy',
+        // RPM visemes are dramatic; direct-write amplitude of 1.0 reads as
+        // over-animated. Dial back to roughly match the old smoothed feel.
+        lipsyncScale: 0.45,
       },
       max: {
         name: 'Max',
         glb: './avatarsdk.glb',
         body: 'M',
         mood: 'neutral',
+        lipsyncScale: 0.5,
         retarget: {
           Neck:  { z: -0.01, rx: -0.15 },
           Neck1: { z: -0.01, rx: -0.15 },
@@ -784,6 +788,7 @@
         glb: './avaturn.glb',
         body: 'F',
         mood: 'neutral',
+        lipsyncScale: 0.5,
         retarget: {
           Hips:   { y: 0.03 },
           Spine:  { y: 0.02 },
@@ -802,6 +807,13 @@
         glb: './vroid.glb',
         body: 'F',
         mood: 'neutral',
+        // Japanese — skip the ASCII char→viseme map and drive mouth purely
+        // from audio level. (Kokoro's Japanese words don't map to English
+        // visemes anyway.)
+        language: 'ja',
+        // VRoid viseme/jaw morphs produce far smaller displacement than
+        // Ready Player Me equivalents, so crank the amplitude.
+        lipsyncScale: 2.8,
         baseline: { headRotateX: -0.1, eyeBlinkLeft: 0.05, eyeBlinkRight: 0.05 },
         // Hair + bust jiggle physics from TalkingHead's siteconfig.js for VRoid.
         modelDynamicBones: [
@@ -1102,8 +1114,8 @@
       if (agentAudioCtx) { try { agentAudioCtx.close(); } catch {} agentAudioCtx = null; }
       agentAnalyser = null;
       if (head) {
-        head.setValue('jawOpen', 0);
-        allVis.forEach(v => head.setValue('viseme_' + v, 0));
+        setMorph('jawOpen', 0);
+        allVis.forEach(v => setMorph('viseme_' + v, 0));
       }
       document.getElementById('camPreview').classList.remove('visible');
     }
@@ -1125,6 +1137,19 @@
       'w':'U','y':'I','h':'sil',
     };
     const allVis = ['sil','PP','FF','TH','DD','kk','CH','SS','nn','RR','aa','E','I','O','U'];
+
+    // Write directly to every mesh's morphTargetInfluences. Bypasses
+    // TalkingHead's setValue which routes through the `system` slot and
+    // exponentially smooths with a tiny max velocity (5/sec) — fine for mood
+    // morphs, too slow for phoneme-rate visemes, especially on VRoid whose
+    // morph shapes are already subtle.
+    function setMorph(name, val) {
+      if (!head || !head.morphs) return;
+      for (const m of head.morphs) {
+        const i = m.morphTargetDictionary?.[name];
+        if (i !== undefined) m.morphTargetInfluences[i] = val;
+      }
+    }
 
     function handleAgentAudio(track) {
       const el = track.attach();
@@ -1184,25 +1209,36 @@
             }
 
             if (wordIdx < words.length) {
-              const word = words[wordIdx].toLowerCase().replace(/[^a-z]/g, '');
-              const wStart = wtimes[wordIdx];
-              const wDur = wdurations[wordIdx];
+              const cfg = CHARACTERS[selectedChar] || CHARACTERS.lisa;
+              const scale = cfg.lipsyncScale || 1;
 
-              if (word.length > 0) {
-                const charDur = wDur / word.length;
-                const wordElapsed = elapsed - wStart;
-                const targetChar = Math.min(Math.floor(wordElapsed / charDur), word.length - 1);
+              if (cfg.language && cfg.language !== 'en') {
+                // Non-English: no char→viseme mapping, just drive the jaw
+                // from the audio amplitude. Lipsync word timing is still
+                // used implicitly via `isSpeaking`.
+                allVis.forEach(v => setMorph('viseme_' + v, 0));
+                setMorph('jawOpen', Math.min(level * 2.5 * scale, 0.4 * scale));
+              } else {
+                const word = words[wordIdx].toLowerCase().replace(/[^a-z]/g, '');
+                const wStart = wtimes[wordIdx];
+                const wDur = wdurations[wordIdx];
 
-                if (targetChar >= 0 && targetChar !== charIdx) {
-                  charIdx = targetChar;
+                if (word.length > 0) {
+                  const charDur = wDur / word.length;
+                  const wordElapsed = elapsed - wStart;
+                  const targetChar = Math.min(Math.floor(wordElapsed / charDur), word.length - 1);
+
+                  if (targetChar >= 0 && targetChar !== charIdx) {
+                    charIdx = targetChar;
+                  }
+
+                  const ch = word[Math.max(0, charIdx)] || '';
+                  const vis = charViseme[ch] || 'sil';
+
+                  allVis.forEach(v => setMorph('viseme_' + v, 0));
+                  setMorph('viseme_' + vis, 0.35 * scale);
+                  setMorph('jawOpen', Math.min(level * 2 * scale, 0.3 * scale));
                 }
-
-                const ch = word[Math.max(0, charIdx)] || '';
-                const vis = charViseme[ch] || 'sil';
-
-                allVis.forEach(v => head.setValue('viseme_' + v, 0));
-                head.setValue('viseme_' + vis, 0.35);
-                head.setValue('jawOpen', Math.min(level * 2, 0.3));
               }
             } else {
               // Finished this lipsync data
@@ -1210,12 +1246,13 @@
             }
           } else {
             // No lipsync data — simple jaw movement from audio
-            head.setValue('jawOpen', Math.min(level * 1.5, 0.25));
+            const scale = (CHARACTERS[selectedChar] || CHARACTERS.lisa).lipsyncScale || 1;
+            setMorph('jawOpen', Math.min(level * 1.5 * scale, 0.25 * scale));
           }
         } else {
           // Silent
-          head.setValue('jawOpen', 0);
-          allVis.forEach(v => head.setValue('viseme_' + v, 0));
+          setMorph('jawOpen', 0);
+          allVis.forEach(v => setMorph('viseme_' + v, 0));
 
           // If we were playing lipsync and audio stopped, check if done
           if (currentData) {
