@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Lisa - AI Voice Assistant</title>
+  <title>BRO - AI Voice Assistant</title>
   <script src="https://cdn.jsdelivr.net/npm/livekit-client@2/dist/livekit-client.umd.js"></script>
   <script type="importmap">
   { "imports": {
@@ -470,6 +470,43 @@
       outline: none;
     }
     .setup-field select:hover { border-color: #3f3f46; }
+    .char-picker {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.5rem;
+    }
+    .char-opt {
+      background: #18181b;
+      border: 1px solid #27272a;
+      color: #a1a1aa;
+      border-radius: 10px;
+      padding: 0.6rem 0.7rem;
+      cursor: pointer;
+      font-family: inherit;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.15rem;
+      transition: all 0.15s;
+    }
+    .char-opt:hover { border-color: #3f3f46; background: #1c1c22; }
+    .char-opt.active {
+      border-color: #6366f1;
+      background: #1e1b4b;
+      color: #c7d2fe;
+    }
+    .char-opt .char-name {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #fff;
+    }
+    .char-opt.active .char-name { color: #e0e7ff; }
+    .char-opt .char-sub {
+      font-size: 0.6rem;
+      color: #52525b;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
     .setup-cam-preview {
       width: 100%;
       height: 160px;
@@ -563,8 +600,22 @@
   <!-- Setup Overlay -->
   <div class="setup-overlay" id="setupOverlay">
     <div class="setup-card">
-      <h2>Welcome to Lisa</h2>
-      <p class="setup-sub">Configure your devices before starting</p>
+      <h2>Pick your companion</h2>
+      <p class="setup-sub">Configure before starting the session</p>
+
+      <div class="setup-field">
+        <label>Character</label>
+        <div class="char-picker" id="charPicker">
+          <button type="button" class="char-opt active" data-char="lisa">
+            <span class="char-name">Lisa</span>
+            <span class="char-sub">female · warm</span>
+          </button>
+          <button type="button" class="char-opt" data-char="max">
+            <span class="char-name">Max</span>
+            <span class="char-sub">male · laid-back</span>
+          </button>
+        </div>
+      </div>
 
       <div class="setup-field">
         <label>Microphone</label>
@@ -602,7 +653,7 @@
         <span class="cam-preview-dot"></span>
       </div>
       <div class="avatar-label">
-        <h2>Lisa</h2>
+        <h2 id="charName">Lisa</h2>
         <p>AI Voice Assistant</p>
       </div>
     </div>
@@ -612,7 +663,7 @@
       <div class="header">
         <div class="brand">
           <div class="brand-dot offline" id="dot"></div>
-          <h1>Lisa</h1>
+          <h1 id="brandName">Lisa</h1>
         </div>
         <button class="connect-btn" id="btn" onclick="toggle()">Connect</button>
       </div>
@@ -635,7 +686,7 @@
           <button class="clear-btn" onclick="clearChat()">Clear</button>
         </div>
         <div class="chat" id="transcript">
-          <div class="chat-empty" id="emptyState">Start a conversation with Lisa</div>
+          <div class="chat-empty" id="emptyState">Start a conversation</div>
         </div>
         <div class="metrics-bar">
           <div class="metric">
@@ -677,6 +728,15 @@
     const setupCamToggle = document.getElementById('setupCamToggle');
     const setupCamVideo = document.getElementById('setupCamVideo');
     const setupCamPlaceholder = document.getElementById('setupCamPlaceholder');
+    const charPicker = document.getElementById('charPicker');
+
+    // Characters must match ALLOWED_CHARACTERS in ui/server.py and
+    // CHARACTERS in src/agent.py (same keys → same voice/name mapping).
+    const CHARACTERS = {
+      lisa: { name: 'Lisa', glb: './brunette.glb', body: 'F', mood: 'happy' },
+      max:  { name: 'Max',  glb: './vroid.glb',    body: 'M', mood: 'neutral' },
+    };
+    let selectedChar = 'lisa';
 
     let room = null, connected = false, head = null;
     let cueArrived = false;       // true if agent emitted [mood:X]/[gesture:Y] this turn
@@ -684,9 +744,24 @@
     let selectedMicId = null, selectedCamId = null, cameraWanted = false;
     let setupPreviewStream = null;
 
+    // Character picker
+    charPicker.addEventListener('click', (e) => {
+      const btn = e.target.closest('.char-opt');
+      if (!btn) return;
+      selectedChar = btn.dataset.char;
+      charPicker.querySelectorAll('.char-opt').forEach(b =>
+        b.classList.toggle('active', b === btn));
+    });
+
     // ── Avatar ──
     async function loadAvatar() {
       try {
+        const cfg = CHARACTERS[selectedChar] || CHARACTERS.lisa;
+        // Reflect the chosen name in the UI
+        document.getElementById('charName').textContent = cfg.name;
+        document.getElementById('brandName').textContent = cfg.name;
+        document.title = `${cfg.name} - AI Voice Assistant`;
+
         head = new TalkingHead(document.getElementById('avatar'), {
           ttsEndpoint: null,
           cameraView: 'upper',
@@ -696,9 +771,9 @@
         avatarMsg.textContent = 'Loading 3D model...';
 
         await head.showAvatar({
-          url: './brunette.glb',
-          body: 'F',
-          avatarMood: 'happy',
+          url: cfg.glb,
+          body: cfg.body,
+          avatarMood: cfg.mood,
           lipsyncLang: 'en',
         }, (ev) => {
           if (ev.lengthComputable) {
@@ -707,7 +782,7 @@
         });
 
         avatarMsg.style.display = 'none';
-        head.setMood('happy');
+        head.setMood(cfg.mood);
         head.setView('full');
       } catch (err) {
         console.error('Avatar error:', err);
@@ -817,7 +892,7 @@
       btn.textContent = 'Connecting...';
       statusEl.textContent = 'Establishing connection...';
       try {
-        const data = await (await fetch(TOKEN_URL)).json();
+        const data = await (await fetch(`${TOKEN_URL}?character=${encodeURIComponent(selectedChar)}`)).json();
         room = new LivekitClient.Room({
           audioCaptureDefaults: { autoGainControl: true, noiseSuppression: true },
         });
@@ -901,7 +976,10 @@
         btn.className = 'connect-btn connected';
         btn.textContent = 'Disconnect';
         dot.className = 'brand-dot';
-        statusEl.textContent = cameraWanted ? 'Connected — Lisa can see and hear you' : 'Connected — speak to Lisa';
+        const charName = (CHARACTERS[selectedChar] || CHARACTERS.lisa).name;
+        statusEl.textContent = cameraWanted
+          ? `Connected — ${charName} can see and hear you`
+          : `Connected — speak to ${charName}`;
       } catch (err) {
         btn.className = 'connect-btn';
         btn.textContent = 'Connect';
@@ -917,7 +995,7 @@
       dot.className = 'brand-dot offline';
       statusEl.textContent = '';
       // Clear chat
-      transcript.innerHTML = '<div class="chat-empty">Start a conversation with Lisa</div>';
+      transcript.innerHTML = '<div class="chat-empty">Start a conversation</div>';
       lipSyncTimers.forEach(t => clearTimeout(t));
       lipSyncTimers = [];
       lipsyncQueue = [];
@@ -1064,7 +1142,8 @@
       const div = document.createElement('div');
       if (segId) div.id = 'seg-' + segId;
       div.className = 'msg ' + role;
-      const av = role === 'user' ? 'U' : 'L';
+      const charName = (CHARACTERS[selectedChar] || CHARACTERS.lisa).name;
+      const av = role === 'user' ? 'U' : charName[0].toUpperCase();
       div.innerHTML = `<span class="av">${av}</span><div class="bubble"><span class="t">${text}</span></div>`;
       transcript.appendChild(div);
       transcript.scrollTop = transcript.scrollHeight;
@@ -1072,7 +1151,7 @@
 
 
     window.clearChat = () => {
-      transcript.innerHTML = '<div class="chat-empty" id="emptyState">Start a conversation with Lisa</div>';
+      transcript.innerHTML = '<div class="chat-empty" id="emptyState">Start a conversation</div>';
     };
 
     // ── Avatar controls ──
