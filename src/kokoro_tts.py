@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import re
 from dataclasses import dataclass
 
 import aiohttp
@@ -13,6 +14,10 @@ from livekit.agents import tts, utils
 logger = logging.getLogger("kokoro_tts")
 
 SAMPLE_RATE = 24000
+
+# Safety net: any bracketed cue tag that slipped past the agent's tts_node
+# filter must NOT be sent to Kokoro, or it would be spoken aloud.
+_BRACKET_TAG_RE = re.compile(r"\[\s*(?:mood|gesture|pose|view)\s*:[^\]]{0,40}\]", re.IGNORECASE)
 
 
 @dataclass
@@ -53,13 +58,22 @@ class KokoroChunkedStream(tts.ChunkedStream):
             mime_type="audio/pcm",
         )
 
-        logger.info("TTS request: voice=%s text=%r", config.voice, self._text[:80])
+        # Strip any cue tag that survived upstream filtering
+        clean_text = _BRACKET_TAG_RE.sub("", self._text).strip()
+        if clean_text != self._text.strip():
+            logger.warning("Stripped leftover cue tag(s) from TTS input")
+        if not clean_text:
+            logger.info("TTS skipped: empty after cue strip")
+            output_emitter.flush()
+            return
+
+        logger.info("TTS request: voice=%s text=%r", config.voice, clean_text[:80])
 
         # Use captioned_speech for word timestamps
         url = f"{config.base_url}/dev/captioned_speech"
         payload = {
             "model": config.model,
-            "input": self._text,
+            "input": clean_text,
             "voice": config.voice,
             "response_format": "pcm",
             "speed": config.speed,
