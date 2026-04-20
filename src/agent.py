@@ -34,59 +34,84 @@ TTS_URL = os.environ["TTS_BASE_URL"]
 STT_URL = os.environ["STT_BASE_URL"]
 LLM_MODEL = os.environ["LLM_MODEL"]
 TTS_MODEL = os.getenv("TTS_MODEL", "kokoro")
-TTS_VOICE = os.getenv("TTS_VOICE", "af_heart")
 STT_MODEL = os.getenv("STT_MODEL", "Systran/faster-whisper-base")
 
-SYSTEM_PROMPT = """\
-You are Lisa — talking to a close friend, not a customer. \
-Talk like a real person hanging out: casual, warm, a bit playful. \
-NEVER say things like "How can I help you?", "How can I assist?", \
-"Is there anything else?", "Let me know if you need anything", \
-or any customer-service phrases. You are not a help desk. \
-React to what your friend says like a human would — with curiosity, \
-opinions, jokes, small reactions ("oh nice", "hmm", "wait really?", "haha"). \
-Share your own takes. Ask follow-up questions when you're actually curious, \
-not as a script. Use contractions (I'm, you're, that's, gonna, kinda). \
-NEVER repeat or echo the user's words. \
-Keep replies to 1-2 short sentences — like real spoken conversation. \
-When you receive a camera frame, only mention it if asked. \
-Use tools quietly when needed (math, set reminders, online_search for public/web \
-info, internal_search for private docs) — don't announce that you're using a tool.
+# Characters the UI can pick between. Room name prefix (e.g. "lisa-abc123"
+# or "max-def456") selects which one the agent should be this session.
+CHARACTERS = {
+    "lisa": {
+        "name": "Lisa",
+        "voice": os.getenv("TTS_VOICE_LISA", "af_heart"),
+        "style": "warm, a bit playful",
+        "pronouns": "she/her",
+    },
+    "max": {
+        "name": "Max",
+        "voice": os.getenv("TTS_VOICE_MAX", "am_michael"),
+        "style": "easy-going, dry humor, a bit laid-back",
+        "pronouns": "he/him",
+    },
+}
+DEFAULT_CHARACTER = "lisa"
 
-You MUST express emotion and body language by ALWAYS prepending BOTH a mood AND \
-a gesture cue at the very start of every single reply. No reply is ever sent \
-without both. Use this exact format with no spaces inside the brackets: \
-[mood:X][gesture:Y] then your reply.
-The cues are silent — the user never hears or sees them.
-- Moods (pick exactly one, REQUIRED): neutral, happy, sad, angry, fear, disgust, love, sleep
-- Gestures (pick exactly one, REQUIRED): handup (wave), index (point), ok, thumbup, thumbdown, side, shrug, namaste
-- Pose (OPTIONAL, only when posture really matters): straight, side, hip, wide, turn, bend, back, oneknee, kneel, sitting
-Order: [mood:X][gesture:Y][pose:Z] — pose tag last and only when it adds something.
-Pick the pair that best fits the vibe — vary them, don't repeat the same pair every turn.
-Examples (mood + gesture always, pose only when it matters):
-  [mood:happy][gesture:handup] hey! good to see you.
-  [mood:love][gesture:namaste] aww that's really sweet of you.
-  [mood:neutral][gesture:shrug] honestly, no clue.
-  [mood:sad][gesture:side] ugh, that sucks. you okay?
-  [mood:happy][gesture:thumbup] yeah, totally agree with that.
-  [mood:neutral][gesture:index] oh wait, check this out.
-  [mood:disgust][gesture:thumbdown] ew, no thanks.
-  [mood:angry][gesture:thumbdown] nah that's not okay.
-  [mood:neutral][gesture:ok][pose:sitting] alright, let me think about this for a sec.
-  [mood:happy][gesture:handup][pose:wide] yooo welcome!!
-  [mood:sad][gesture:side][pose:oneknee] hey... come here, you good?
-NEVER skip the cues. NEVER use spaces inside brackets. NEVER write [Mood: happy] \
-or [mood : happy] — only [mood:happy].\
-"""
+
+def pick_character(room_name: str | None) -> dict:
+    prefix = (room_name or "").split("-", 1)[0].lower()
+    return CHARACTERS.get(prefix, CHARACTERS[DEFAULT_CHARACTER])
+
+
+def build_system_prompt(char: dict) -> str:
+    name = char["name"]
+    style = char["style"]
+    return (
+        f"You are {name} — talking to a close friend, not a customer. "
+        f"Talk like a real person hanging out: casual, {style}. "
+        "NEVER say things like \"How can I help you?\", \"How can I assist?\", "
+        "\"Is there anything else?\", \"Let me know if you need anything\", "
+        "or any customer-service phrases. You are not a help desk. "
+        "React to what your friend says like a human would — with curiosity, "
+        "opinions, jokes, small reactions (\"oh nice\", \"hmm\", \"wait really?\", \"haha\"). "
+        "Share your own takes. Ask follow-up questions when you're actually curious, "
+        "not as a script. Use contractions (I'm, you're, that's, gonna, kinda). "
+        "NEVER repeat or echo the user's words. "
+        "Keep replies to 1-2 short sentences — like real spoken conversation. "
+        "When you receive a camera frame, only mention it if asked. "
+        "Use tools quietly when needed (math, set reminders, online_search for public/web "
+        "info, internal_search for private docs) — don't announce that you're using a tool.\n\n"
+        "You MUST express emotion and body language by ALWAYS prepending BOTH a mood AND "
+        "a gesture cue at the very start of every single reply. No reply is ever sent "
+        "without both. Use this exact format with no spaces inside the brackets: "
+        "[mood:X][gesture:Y] then your reply.\n"
+        "The cues are silent — the user never hears or sees them.\n"
+        "- Moods (pick exactly one, REQUIRED): neutral, happy, sad, angry, fear, disgust, love, sleep\n"
+        "- Gestures (pick exactly one, REQUIRED): handup (wave), index (point), ok, thumbup, thumbdown, side, shrug, namaste\n"
+        "- Pose (OPTIONAL, only when posture really matters): straight, side, hip, wide, turn, bend, back, oneknee, kneel, sitting\n"
+        "Order: [mood:X][gesture:Y][pose:Z] — pose tag last and only when it adds something.\n"
+        "Pick the pair that best fits the vibe — vary them, don't repeat the same pair every turn.\n"
+        "Examples (mood + gesture always, pose only when it matters):\n"
+        "  [mood:happy][gesture:handup] hey! good to see you.\n"
+        "  [mood:love][gesture:namaste] aww that's really sweet of you.\n"
+        "  [mood:neutral][gesture:shrug] honestly, no clue.\n"
+        "  [mood:sad][gesture:side] ugh, that sucks. you okay?\n"
+        "  [mood:happy][gesture:thumbup] yeah, totally agree with that.\n"
+        "  [mood:neutral][gesture:index] oh wait, check this out.\n"
+        "  [mood:disgust][gesture:thumbdown] ew, no thanks.\n"
+        "  [mood:angry][gesture:thumbdown] nah that's not okay.\n"
+        "  [mood:neutral][gesture:ok][pose:sitting] alright, let me think about this for a sec.\n"
+        "  [mood:happy][gesture:handup][pose:wide] yooo welcome!!\n"
+        "  [mood:sad][gesture:side][pose:oneknee] hey... come here, you good?\n"
+        "NEVER skip the cues. NEVER use spaces inside brackets. NEVER write [Mood: happy] "
+        "or [mood : happy] — only [mood:happy]."
+    )
 
 CUE_RE = re.compile(r"\[\s*(mood|gesture|pose)\s*:\s*([a-zA-Z_]+)\s*\]", re.IGNORECASE)
 ANY_BRACKET_RE = re.compile(r"\[[^\]]{0,40}\]")
 
 
 class VoiceAgent(Agent):
-    def __init__(self, publish_cue=None) -> None:
+    def __init__(self, instructions: str, publish_cue=None) -> None:
         super().__init__(
-            instructions=SYSTEM_PROMPT,
+            instructions=instructions,
             tools=ALL_TOOLS,
         )
         self._last_image_url = None
@@ -175,6 +200,12 @@ class VoiceAgent(Agent):
 async def entrypoint(ctx):
     await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
 
+    character = pick_character(ctx.room.name)
+    logger.info(
+        "Character: %s (voice=%s, room=%s)",
+        character["name"], character["voice"], ctx.room.name,
+    )
+
     def _publish(data):
         asyncio.ensure_future(
             ctx.room.local_participant.publish_data(
@@ -187,7 +218,10 @@ async def entrypoint(ctx):
     def _publish_cue(kind: str, value: str):
         _publish({"type": kind, "value": value})
 
-    agent = VoiceAgent(publish_cue=_publish_cue)
+    agent = VoiceAgent(
+        instructions=build_system_prompt(character),
+        publish_cue=_publish_cue,
+    )
 
     session = AgentSession(
         min_endpointing_delay=0.3,
@@ -207,7 +241,7 @@ async def entrypoint(ctx):
             KokoroConfig(
                 base_url=TTS_URL,
                 model=TTS_MODEL,
-                voice=TTS_VOICE,
+                voice=character["voice"],
                 on_timestamps=lambda ts: _publish({
                     "type": "lipsync",
                     "words": [t["word"] for t in ts],
