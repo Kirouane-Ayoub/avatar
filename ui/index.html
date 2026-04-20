@@ -621,23 +621,6 @@
 
       <div class="avatar-controls">
         <div class="ctrl-group">
-          <span class="ctrl-label">Mood</span>
-          <button class="ctrl-btn active" onclick="setMood('happy')">Happy</button>
-          <button class="ctrl-btn" onclick="setMood('neutral')">Neutral</button>
-          <button class="ctrl-btn" onclick="setMood('sad')">Sad</button>
-          <button class="ctrl-btn" onclick="setMood('angry')">Angry</button>
-          <button class="ctrl-btn" onclick="setMood('love')">Love</button>
-          <button class="ctrl-btn" onclick="setMood('sleep')">Sleep</button>
-        </div>
-        <div class="ctrl-group">
-          <span class="ctrl-label">Gesture</span>
-          <button class="ctrl-btn" onclick="doGesture('handup')">Wave</button>
-          <button class="ctrl-btn" onclick="doGesture('thumbup')">Thumbs Up</button>
-          <button class="ctrl-btn" onclick="doGesture('ok')">OK</button>
-          <button class="ctrl-btn" onclick="doGesture('shrug')">Shrug</button>
-          <button class="ctrl-btn" onclick="doGesture('namaste')">Namaste</button>
-        </div>
-        <div class="ctrl-group">
           <span class="ctrl-label">View</span>
           <button class="ctrl-btn" onclick="setAvatarView('head')">Face</button>
           <button class="ctrl-btn" onclick="setAvatarView('upper')">Upper</button>
@@ -696,6 +679,8 @@
     const setupCamPlaceholder = document.getElementById('setupCamPlaceholder');
 
     let room = null, connected = false, head = null;
+    let cueArrived = false;       // true if agent emitted [mood:X]/[gesture:Y] this turn
+    let lastAgentTextAt = 0;      // ms timestamp of last agent transcription (for idle gestures)
     let selectedMicId = null, selectedCamId = null, cameraWanted = false;
     let setupPreviewStream = null;
 
@@ -852,6 +837,9 @@
             if (d.type === 'stt') setM('m-stt', d.duration_ms, 300, 600);
             else if (d.type === 'tts') setM('m-tts', d.ttfb_ms, 200, 500);
             else if (d.type === 'lipsync') queueLipsync(d);
+            else if (d.type === 'mood') { if (head && d.value) setMood(d.value); cueArrived = true; }
+            else if (d.type === 'gesture') { if (head && d.value) doGesture(d.value); cueArrived = true; }
+            else if (d.type === 'pose') { if (head && d.value) doPose(d.value); cueArrived = true; }
             else if (d.type === 'pipeline') {
               if (d.llm_ttft_ms) setM('m-llm', d.llm_ttft_ms, 300, 800);
               if (d.tts_ttfb_ms) setM('m-tts', d.tts_ttfb_ms, 200, 500);
@@ -867,17 +855,27 @@
             const isAgent = participant?.identity !== 'user';
             const role = isAgent ? 'agent' : 'user';
 
-            // Auto mood + gesture from Lisa's responses
+            // Strip [mood:X]/[gesture:Y]/[pose:Z] cue tags from displayed text
+            const cleanText = isAgent
+              ? seg.text.replace(/\[\s*(mood|gesture|pose)\s*:\s*[a-zA-Z_]+\s*\]\s*/gi, '')
+              : seg.text;
+
+            // Auto mood + gesture from Lisa's responses (fallback when she
+            // didn't emit an explicit [mood:X]/[gesture:Y] cue this turn)
             if (isAgent && head) {
-              const mood = detectMood(seg.text);
-              if (mood) setMood(mood);
-              const gesture = detectGesture(seg.text);
-              if (gesture) doGesture(gesture);
+              lastAgentTextAt = Date.now();
+              if (!cueArrived) {
+                const mood = detectMood(cleanText);
+                if (mood) setMood(mood);
+                const gesture = detectGesture(cleanText);
+                if (gesture) doGesture(gesture);
+              }
+              if (seg.final) cueArrived = false;
             }
 
             const el = document.getElementById('seg-' + seg.id);
-            if (el) el.querySelector('.t').textContent = seg.text;
-            else addMsg(role, seg.text, seg.id);
+            if (el) el.querySelector('.t').textContent = cleanText;
+            else addMsg(role, cleanText, seg.id);
           }
         });
 
@@ -1092,6 +1090,14 @@
       try { head.playGesture(name, 3, false, 1000); } catch (e) { console.warn('gesture:', e); }
     };
 
+    const POSES = new Set(['side','hip','turn','bend','back','straight','wide','oneknee','kneel','sitting']);
+    window.doPose = (name) => {
+      if (!head || !POSES.has(name)) { console.warn('unknown pose:', name); return; }
+      const tpl = head.poseTemplates && head.poseTemplates[name];
+      if (!tpl) { console.warn('pose template missing:', name); return; }
+      try { head.setPoseFromTemplate(tpl, 2000); } catch (e) { console.warn('pose:', e); }
+    };
+
     window.setAvatarView = (view) => {
       if (!head) return;
       try { head.setView(view); } catch (e) { console.warn('setView:', e); }
@@ -1101,28 +1107,63 @@
       });
     };
 
-    // Auto mood from conversation context
-    function detectMood(text) {
+    // Score-based mood/gesture detection. Each label gets points for keyword
+    // hits + punctuation/emoji bonuses. Highest score wins. Falls back when
+    // the agent didn't emit an explicit [mood:X]/[gesture:Y] tag.
+    const MOOD_KEYWORDS = {
+      love:  /\b(love|loved|adore|heart|sweet|cute|beautiful|gorgeous|amazing|wonderful|precious|darling|amour|aime|habibi)\b|❤|🥰|😍|💕/i,
+      sad:   /\b(sorry|sad|sadly|unfortunately|bad news|miss you|lonely|cry|crying|hurt|hurts|tough|sucks|ugh|triste|désolé|حزين|آسف)\b|😢|😭|💔|😞/i,
+      angry: /\b(angry|mad|annoyed|frustrated|hate|terrible|awful|ridiculous|pissed|énervé|fâché|غاضب)\b|😡|🤬|😤/i,
+      fear:  /\b(afraid|scared|scary|worried|nervous|anxious|panic|yikes|peur|خائف)\b|😨|😱|😰/i,
+      sleep: /\b(bye|goodbye|goodnight|night night|sleep|sleepy|tired|exhausted|bonne nuit|تصبح على خير)\b|😴|💤|🥱/i,
+      happy: /\b(great|awesome|happy|glad|nice|good|cool|sweet|haha|lol|yay|hi|hey|hello|welcome|thanks|thank|love it|génial|super|merci|bien|سعيد|ممتاز|مرحبا)\b|😀|😄|😊|🙂|😁|😎|🎉/i,
+    };
+
+    const GESTURE_KEYWORDS = {
+      shrug:   /\b(don't know|dunno|not sure|no idea|whatever|maybe|i guess|qui sait|ما أدري)\b/i,
+      thumbup: /\b(yes|yep|yeah|yup|correct|right|exactly|perfect|nailed it|sounds good|sure|absolutely|true|makes sense|i agree|for sure|of course|definitely|oui|نعم|تمام)\b|👍/i,
+      thumbdown:/\b(nope|no way|never|terrible|awful|bad idea|don't like|absolutely not|impossible)\b|👎/i,
+      handup:  /\b(hi|hello|hey|hiya|wave|waving|bye|goodbye|see ya|salut|bonjour|مرحبا|مع السلامة)\b|👋/i,
+      ok:      /\b(ok|okay|fine|alright|all right|got it|d'accord|تمام)\b|👌/i,
+      namaste: /\b(thank|thanks|grateful|appreciate|much obliged|merci|شكرا)\b|🙏/i,
+      index:   /\b(look|notice|check this|by the way|fyi|here|important|remember)\b|☝/i,
+      side:    /\b(hmm|hmmm|let me think|interesting|wait what|really\?)\b/i,
+    };
+
+    function pickByScore(text, table) {
       const t = text.toLowerCase();
-      if (/\b(love|heart|sweet|cute|beautiful|amazing|wonderful)\b/.test(t)) return 'love';
-      if (/\b(sorry|sad|unfortunately|bad news|miss you|lonely)\b/.test(t)) return 'sad';
-      if (/\b(angry|annoyed|frustrated|hate|terrible|awful)\b/.test(t)) return 'angry';
-      if (/\b(afraid|scary|worried|nervous|anxious)\b/.test(t)) return 'fear';
-      if (/\b(great|awesome|happy|nice|good|welcome|hello|hi|hey|thanks|thank)\b/.test(t)) return 'happy';
-      if (/\b(bye|goodbye|goodnight|sleep|tired)\b/.test(t)) return 'sleep';
+      let best = null, bestScore = 0;
+      for (const [label, re] of Object.entries(table)) {
+        const matches = t.match(new RegExp(re.source, re.flags + (re.flags.includes('g') ? '' : 'g')));
+        const score = matches ? matches.length : 0;
+        if (score > bestScore) { best = label; bestScore = score; }
+      }
+      return best;
+    }
+
+    function detectMood(text) {
+      const m = pickByScore(text, MOOD_KEYWORDS);
+      if (m) return m;
+      // Punctuation cues
+      if (/!{2,}|🎉|❗/.test(text)) return 'happy';
       return null;
     }
 
-    // Auto gesture from conversation
     function detectGesture(text) {
-      const t = text.toLowerCase();
-      if (/\b(don't know|not sure|no idea|maybe)\b/.test(t)) return 'shrug';
-      if (/\b(yes|correct|right|exactly|perfect|sure)\b/.test(t)) return 'thumbup';
-      if (/\b(hi|hello|hey|wave|bye|goodbye)\b/.test(t)) return 'handup';
-      if (/\b(ok|okay|fine|alright|got it)\b/.test(t)) return 'ok';
-      if (/\b(thank|thanks|grateful|appreciate)\b/.test(t)) return 'namaste';
-      return null;
+      return pickByScore(text, GESTURE_KEYWORDS);
     }
+
+    // Subtle idle micro-gestures so Lisa doesn't feel frozen between turns.
+    // Fires only when she's been silent for a while and isn't actively speaking.
+    const IDLE_GESTURES = ['side', 'index', 'ok'];
+    setInterval(() => {
+      if (!head || !connected) return;
+      const silentMs = Date.now() - lastAgentTextAt;
+      if (silentMs < 6000) return;                 // only when idle ≥ 6s
+      if (Math.random() > 0.25) return;            // ~25% chance per tick
+      const g = IDLE_GESTURES[Math.floor(Math.random() * IDLE_GESTURES.length)];
+      try { head.playGesture(g, 1.5, false, 800); } catch {}
+    }, 4000);
 
     function setM(id, val, g, o) {
       const el = document.getElementById(id);
