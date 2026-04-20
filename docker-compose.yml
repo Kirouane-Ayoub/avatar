@@ -41,7 +41,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - WHISPER__MODEL=Systran/faster-whisper-tiny.en
+      - WHISPER__MODEL=Systran/faster-whisper-tiny
       - WHISPER__TTL=0
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -60,7 +60,7 @@ services:
         condition: service_healthy
     entrypoint: >
       sh -c 'echo "Downloading Whisper model..." &&
-             curl -X POST "http://speaches:8000/v1/models/Systran/faster-whisper-tiny.en" &&
+             curl -X POST "http://speaches:8000/v1/models/Systran/faster-whisper-tiny" &&
              echo "Model downloaded successfully."'
     networks:
       - bro-network
