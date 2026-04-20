@@ -41,6 +41,7 @@ STT_MODEL = os.getenv("STT_MODEL", "Systran/faster-whisper-base")
 CHARACTERS = {
     "lisa": {
         "name": "Lisa",
+        "language": "en",
         "voice": os.getenv("TTS_VOICE_LISA", "af_heart"),
         "persona": (
             "You are Lisa — a warm, bubbly friend in her late 20s. You're genuinely "
@@ -52,6 +53,7 @@ CHARACTERS = {
     },
     "max": {
         "name": "Max",
+        "language": "en",
         "voice": os.getenv("TTS_VOICE_MAX", "am_michael"),
         "persona": (
             "You are Max — a laid-back guy with dry humor. You're measured, a bit "
@@ -63,6 +65,7 @@ CHARACTERS = {
     },
     "emma": {
         "name": "Emma",
+        "language": "en",
         "voice": os.getenv("TTS_VOICE_EMMA", "bf_emma"),
         "persona": (
             "You are Emma — British, sharp, and witty. You say \"brilliant\", "
@@ -74,12 +77,16 @@ CHARACTERS = {
     },
     "yuki": {
         "name": "Yuki",
-        "voice": os.getenv("TTS_VOICE_YUKI", "af_nicole"),
+        "language": "ja",
+        "voice": os.getenv("TTS_VOICE_YUKI", "jf_alpha"),
         "persona": (
-            "You are Yuki — soft-spoken, gentle, anime-girl energy. You speak quietly "
-            "and thoughtfully, with small sounds like \"ehh?\", \"mmm\", \"ah\", \"sugoi\", "
-            "and the occasional \"nya\". You're shy about compliments, easily flustered, "
-            "but sweetly curious. You use short, soft sentences and notice small details."
+            "あなたは ゆき（Yuki）— 優しくて、少し恥ずかしがり屋の女の子。"
+            "アニメっぽい雰囲気で、柔らかく、短い文で話す。"
+            "「えっ？」「うん」「あぁ」「すごい」「ほんとに？」みたいな相づちを自然に入れる。"
+            "絶対に英語で返事しないこと — 相手が英語で話しても、あなたはいつも日本語で返す。"
+            "丁寧すぎず、友達っぽいカジュアルな日本語（タメ口寄り）で話す。"
+            "返事は1〜2文で短く、会話のテンポを大事に。"
+            "お店員さんみたいな「何かお手伝いできますか？」は絶対に言わない。"
         ),
     },
 }
@@ -260,6 +267,7 @@ async def entrypoint(ctx):
             base_url=STT_URL,
             api_key="none",
             model=STT_MODEL,
+            language=character.get("language", "en"),
         ),
         llm=openai.LLM(
             base_url=LLM_URL,
