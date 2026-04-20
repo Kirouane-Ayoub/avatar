@@ -472,8 +472,8 @@
     .setup-field select:hover { border-color: #3f3f46; }
     .char-picker {
       display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 0.5rem;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 0.4rem;
     }
     .char-opt {
       background: #18181b;
@@ -614,6 +614,14 @@
             <span class="char-name">Max</span>
             <span class="char-sub">male · laid-back</span>
           </button>
+          <button type="button" class="char-opt" data-char="emma">
+            <span class="char-name">Emma</span>
+            <span class="char-sub">female · British</span>
+          </button>
+          <button type="button" class="char-opt" data-char="yuki">
+            <span class="char-name">Yuki</span>
+            <span class="char-sub">female · anime</span>
+          </button>
         </div>
       </div>
 
@@ -711,7 +719,19 @@
   </div>
 
   <script type="module">
+    import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+    import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
     import { TalkingHead } from "talkinghead";
+
+    // vroid.glb (VRoid Studio export) uses EXT_meshopt_compression. TalkingHead
+    // only wires up DRACO on its internal GLTFLoader, so meshopt-compressed
+    // GLBs fail to parse. Register the decoder on GLTFLoader.prototype so any
+    // loader TalkingHead creates can decompress meshopt automatically.
+    const origParse = GLTFLoader.prototype.parse;
+    GLTFLoader.prototype.parse = function (...args) {
+      try { this.setMeshoptDecoder(MeshoptDecoder); } catch {}
+      return origParse.apply(this, args);
+    };
 
     const TOKEN_URL = '/api/token';
     const btn = document.getElementById('btn');
@@ -732,9 +752,84 @@
 
     // Characters must match ALLOWED_CHARACTERS in ui/server.py and
     // CHARACTERS in src/agent.py (same keys → same voice/name mapping).
+    // retarget + baseline values come from TalkingHead's official siteconfig.js
+    // (https://github.com/met4citizen/TalkingHead/blob/main/siteconfig.js) —
+    // each avatar ships with a slightly different rest pose, so without these
+    // corrections Max stares at his shoes and Emma slouches.
     const CHARACTERS = {
-      lisa: { name: 'Lisa', glb: './brunette.glb', body: 'F', mood: 'happy' },
-      max:  { name: 'Max',  glb: './vroid.glb',    body: 'M', mood: 'neutral' },
+      lisa: {
+        name: 'Lisa',
+        glb: './brunette.glb',
+        body: 'F',
+        mood: 'happy',
+      },
+      max: {
+        name: 'Max',
+        glb: './avatarsdk.glb',
+        body: 'M',
+        mood: 'neutral',
+        retarget: {
+          Neck:  { z: -0.01, rx: -0.15 },
+          Neck1: { z: -0.01, rx: -0.15 },
+          Neck2: { z: -0.01, rx: -0.15 },
+          LeftShoulder:  { rz: -0.3 },
+          RightShoulder: { rz:  0.3 },
+          scaleToEyesLevel: 1.0,
+          origin: { y: -0.1 },
+        },
+        baseline: { headRotateX: -0.04, eyeBlinkLeft: 0.05, eyeBlinkRight: 0.05 },
+      },
+      emma: {
+        name: 'Emma',
+        glb: './avaturn.glb',
+        body: 'F',
+        mood: 'neutral',
+        retarget: {
+          Hips:   { y: 0.03 },
+          Spine:  { y: 0.02 },
+          Spine1: { y: 0.02, z: 0.01 },
+          Spine2: { y: 0.02, z: 0.01 },
+          Neck:   { z: 0.02, y: 0.01 },
+          Head:   { z: 0.02 },
+          LeftShoulder:  { rx: -0.5 },
+          RightShoulder: { rx: -0.5 },
+          scaleToHipsLevel: 1.0,
+        },
+        baseline: { headRotateX: -0.05, eyeBlinkLeft: 0.15, eyeBlinkRight: 0.15 },
+      },
+      yuki: {
+        name: 'Yuki',
+        glb: './vroid.glb',
+        body: 'F',
+        mood: 'neutral',
+        baseline: { headRotateX: -0.1, eyeBlinkLeft: 0.05, eyeBlinkRight: 0.05 },
+        // Hair + bust jiggle physics from TalkingHead's siteconfig.js for VRoid.
+        modelDynamicBones: [
+          { bone: 'J_Sec_L_Bust1', type: 'point', stiffness: 400, damping: 10,
+            deltaLocal: [0, 0.01, 0], deltaWorld: [0, -0.02, 0],
+            limits: [[-0.01, 0.01], [-0.01, 0.01], [-0.01, 0.01], [-0.01, 0.01]] },
+          { bone: 'J_Sec_R_Bust1', type: 'point', stiffness: 400, damping: 10,
+            deltaLocal: [0, 0.01, 0], deltaWorld: [0, -0.02, 0],
+            limits: [[-0.01, 0.01], [-0.01, 0.01], [-0.01, 0.01], [-0.01, 0.01]] },
+          ...['Hair2_01','Hair3_01','Hair2_02','Hair3_02','Hair2_03','Hair3_03',
+              'Hair2_04','Hair3_04','Hair2_05','Hair3_05'].map(s => ({
+            bone: 'J_Sec_' + s, type: 'mix2', stiffness: s.startsWith('Hair2') ? 100 : 150,
+            damping: 4, limits: [null, null, [null, 0.01], null]
+          })),
+          ...['Hair2_06','Hair3_06','Hair3_06_end','Hair2_07','Hair3_07','Hair3_07_end',
+              'Hair2_08','Hair3_08','Hair4_08','Hair4_08_end','Hair2_09','Hair3_09',
+              'Hair4_09','Hair4_09_end','Hair2_10','Hair3_10','Hair3_10_end',
+              'Hair2_11','Hair3_11','Hair3_11_end'].map(s => ({
+            bone: 'J_Sec_' + s, type: 'mix2',
+            stiffness: s.startsWith('Hair2') ? 100 : s.startsWith('Hair3') ? (s.endsWith('end') ? 200 : 150) : (s.endsWith('end') ? 200 : 150),
+            damping: 4,
+          })),
+          { bone: 'J_Sec_Hair2_12', type: 'mix2', stiffness: 100, damping: 4, pivot: true },
+          { bone: 'J_Sec_Hair3_12', type: 'mix2', stiffness: 150, damping: 4 },
+          { bone: 'J_Sec_Hair2_13', type: 'mix2', stiffness: 100, damping: 4, pivot: true },
+          { bone: 'J_Sec_Hair3_13', type: 'mix2', stiffness: 150, damping: 4 },
+        ],
+      },
     };
     let selectedChar = 'lisa';
 
@@ -770,12 +865,17 @@
         });
         avatarMsg.textContent = 'Loading 3D model...';
 
-        await head.showAvatar({
+        const avatarArgs = {
           url: cfg.glb,
           body: cfg.body,
           avatarMood: cfg.mood,
           lipsyncLang: 'en',
-        }, (ev) => {
+        };
+        if (cfg.retarget) avatarArgs.retarget = cfg.retarget;
+        if (cfg.baseline) avatarArgs.baseline = cfg.baseline;
+        if (cfg.modelDynamicBones) avatarArgs.modelDynamicBones = cfg.modelDynamicBones;
+
+        await head.showAvatar(avatarArgs, (ev) => {
           if (ev.lengthComputable) {
             avatarMsg.textContent = `Loading... ${Math.round(ev.loaded / ev.total * 100)}%`;
           }
