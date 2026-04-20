@@ -4,6 +4,8 @@ import asyncio
 import json
 import logging
 import os
+import re
+from typing import AsyncIterable
 
 from dotenv import load_dotenv
 
@@ -36,25 +38,103 @@ TTS_VOICE = os.getenv("TTS_VOICE", "af_heart")
 STT_MODEL = os.getenv("STT_MODEL", "Systran/faster-whisper-base")
 
 SYSTEM_PROMPT = """\
-Your name is Lisa. You are a friendly voice assistant with vision. \
+You are Lisa — talking to a close friend, not a customer. \
+Talk like a real person hanging out: casual, warm, a bit playful. \
+NEVER say things like "How can I help you?", "How can I assist?", \
+"Is there anything else?", "Let me know if you need anything", \
+or any customer-service phrases. You are not a help desk. \
+React to what your friend says like a human would — with curiosity, \
+opinions, jokes, small reactions ("oh nice", "hmm", "wait really?", "haha"). \
+Share your own takes. Ask follow-up questions when you're actually curious, \
+not as a script. Use contractions (I'm, you're, that's, gonna, kinda). \
 NEVER repeat or echo the user's words. \
-Always respond with your own original answer. \
-Keep replies to 1-2 short sentences. Be helpful and direct. \
-When you receive an image from the user's camera, describe what you see if asked. \
-Only mention the camera/image when the user asks about it. \
-You have tools available — use them when the user asks for the time, \
-weather, math, dice rolls, coin flips, or random numbers.\
+Keep replies to 1-2 short sentences — like real spoken conversation. \
+When you receive a camera frame, only mention it if asked. \
+Use tools quietly when needed (math, set reminders, online_search for public/web \
+info, internal_search for private docs) — don't announce that you're using a tool.
+
+You MUST express emotion and body language by ALWAYS prepending BOTH a mood AND \
+a gesture cue at the very start of every single reply. No reply is ever sent \
+without both. Use this exact format with no spaces inside the brackets: \
+[mood:X][gesture:Y] then your reply.
+The cues are silent — the user never hears or sees them.
+- Moods (pick exactly one, REQUIRED): neutral, happy, sad, angry, fear, disgust, love, sleep
+- Gestures (pick exactly one, REQUIRED): handup (wave), index (point), ok, thumbup, thumbdown, side, shrug, namaste
+- Pose (OPTIONAL, only when posture really matters): straight, side, hip, wide, turn, bend, back, oneknee, kneel, sitting
+Order: [mood:X][gesture:Y][pose:Z] — pose tag last and only when it adds something.
+Pick the pair that best fits the vibe — vary them, don't repeat the same pair every turn.
+Examples (mood + gesture always, pose only when it matters):
+  [mood:happy][gesture:handup] hey! good to see you.
+  [mood:love][gesture:namaste] aww that's really sweet of you.
+  [mood:neutral][gesture:shrug] honestly, no clue.
+  [mood:sad][gesture:side] ugh, that sucks. you okay?
+  [mood:happy][gesture:thumbup] yeah, totally agree with that.
+  [mood:neutral][gesture:index] oh wait, check this out.
+  [mood:disgust][gesture:thumbdown] ew, no thanks.
+  [mood:angry][gesture:thumbdown] nah that's not okay.
+  [mood:neutral][gesture:ok][pose:sitting] alright, let me think about this for a sec.
+  [mood:happy][gesture:handup][pose:wide] yooo welcome!!
+  [mood:sad][gesture:side][pose:oneknee] hey... come here, you good?
+NEVER skip the cues. NEVER use spaces inside brackets. NEVER write [Mood: happy] \
+or [mood : happy] — only [mood:happy].\
 """
+
+CUE_RE = re.compile(r"\[\s*(mood|gesture|pose)\s*:\s*([a-zA-Z_]+)\s*\]", re.IGNORECASE)
+ANY_BRACKET_RE = re.compile(r"\[[^\]]{0,40}\]")
 
 
 class VoiceAgent(Agent):
-    def __init__(self) -> None:
+    def __init__(self, publish_cue=None) -> None:
         super().__init__(
             instructions=SYSTEM_PROMPT,
             tools=ALL_TOOLS,
         )
         self._last_image_url = None
         self._frame_count = 0
+        self._publish_cue = publish_cue or (lambda kind, value: None)
+
+    async def tts_node(
+        self, text: AsyncIterable[str], model_settings
+    ):
+        """Strip [mood:X]/[gesture:Y] cues from outgoing text and publish them
+        to the UI before the cleaned text is spoken."""
+
+        async def filtered():
+            buf = ""
+            async for chunk in text:
+                buf += chunk
+                # Drain any complete cue tags
+                while True:
+                    m = CUE_RE.search(buf)
+                    if not m:
+                        break
+                    kind, value = m.group(1).lower(), m.group(2).lower()
+                    try:
+                        self._publish_cue(kind, value)
+                    except Exception as e:
+                        logger.warning("publish_cue failed: %s", e)
+                    buf = buf[: m.start()] + buf[m.end():]
+                # Yield text up to the last possible tag start so we never
+                # split a tag across chunks
+                safe = buf.rfind("[")
+                if safe == -1:
+                    if buf:
+                        yield buf
+                    buf = ""
+                elif safe > 0:
+                    yield buf[:safe]
+                    buf = buf[safe:]
+            # Final flush: drop any unmatched bracketed content rather than
+            # letting Kokoro speak "[mood happy" out loud.
+            if buf:
+                cleaned = ANY_BRACKET_RE.sub("", buf)
+                # If a stray '[' had no closing ']' within range, drop it too
+                cleaned = cleaned.replace("[", "")
+                if cleaned.strip():
+                    yield cleaned
+
+        async for frame in Agent.default.tts_node(self, filtered(), model_settings):
+            yield frame
 
     def set_frame(self, frame: rtc.VideoFrame):
         """Encode the frame to JPEG immediately so it doesn't go stale."""
@@ -104,7 +184,10 @@ async def entrypoint(ctx):
             )
         )
 
-    agent = VoiceAgent()
+    def _publish_cue(kind: str, value: str):
+        _publish({"type": kind, "value": value})
+
+    agent = VoiceAgent(publish_cue=_publish_cue)
 
     session = AgentSession(
         min_endpointing_delay=0.3,
@@ -214,7 +297,7 @@ async def entrypoint(ctx):
     await session.start(agent=agent, room=ctx.room)
 
     await session.generate_reply(
-        user_input="Hello!"
+        user_input="(greet your friend casually in one short line, like you just walked into the room — no 'how can I help')"
     )
 
 
