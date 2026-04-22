@@ -93,7 +93,7 @@ class KokoroChunkedStream(tts.ChunkedStream):
                 # Decode audio from base64
                 audio_b64 = data.get("audio", "")
                 audio_bytes = base64.b64decode(audio_b64)
-                timestamps = data.get("timestamps", [])
+                timestamps = data.get("timestamps") or []
 
                 if audio_bytes:
                     # Send timestamps BEFORE audio so browser has them ready
