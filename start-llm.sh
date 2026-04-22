@@ -12,4 +12,5 @@ echo ""
 echo "The Docker agent connects via: http://host.docker.internal:$PORT/v1"
 echo "──────────────────────────────────────────────────"
 
-mlx_lm.server --model "$MODEL" --port "$PORT"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+"$SCRIPT_DIR/.venv/bin/mlx_lm.server" --model "$MODEL" --port "$PORT"
