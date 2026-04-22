@@ -261,7 +261,10 @@ async def entrypoint(ctx):
             base_url=LLM_URL,
             api_key=LLM_API_KEY,
             model=LLM_MODEL,
-            extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+            extra_body={
+                "think": False,
+                "chat_template_kwargs": {"enable_thinking": False},
+            },
         ),
         tts=KokoroTTS(
             KokoroConfig(
