@@ -20,7 +20,7 @@ PORT = int(os.getenv("UI_PORT", "3000"))
 UI_DIR = Path(__file__).parent
 
 # Must match the keys in src/agent.py CHARACTERS.
-ALLOWED_CHARACTERS = {"lisa", "max", "emma", "yuki"}
+ALLOWED_CHARACTERS = {"lisa", "max", "yuki"}
 DEFAULT_CHARACTER = "lisa"
 
 
