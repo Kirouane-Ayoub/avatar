@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AvatarMeta, Mood, SessionSetup } from '../types';
 import { POSE_SET } from '../data/cues';
+import { languageFromVoice } from '../data/voice_lang';
 import { useTalkingHead } from '../hooks/useTalkingHead';
 import {
   useSession,
@@ -137,10 +138,15 @@ export function SessionView({ setup, avatar, connection, onExit }: Props) {
     onAgentText: handleAgentText,
   });
 
+  // Language fully follows the picked voice; defaults to English when no
+  // voice was picked. Any avatar pairs with any voice.
+  const lipsyncLanguage = languageFromVoice(setup.voice, 'en');
+
   useLipsyncDriver(
     head,
     session.remoteAudio,
     avatar,
+    lipsyncLanguage,
     lipsyncQueueRef,
     session.status === 'connected',
   );
