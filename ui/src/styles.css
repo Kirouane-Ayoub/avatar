@@ -1006,6 +1006,32 @@ code {
 }
 .icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
+.whisper-pill {
+  background: transparent;
+  border: 1px solid #27272a;
+  color: #a1a1aa;
+  font-family: inherit;
+  font-size: 0.58rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 4px 9px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+.whisper-pill:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: #3f3f46;
+  color: #e4e4e7;
+}
+.whisper-pill.on {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.22), rgba(139, 92, 246, 0.22));
+  border-color: rgba(139, 92, 246, 0.55);
+  color: #c7d2fe;
+}
+.whisper-pill:disabled { opacity: 0.4; cursor: not-allowed; }
+
 /* ── Session side panel ── */
 .session-side {
   display: flex;
