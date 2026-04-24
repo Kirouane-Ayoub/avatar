@@ -56,20 +56,6 @@ export const AVATARS: Record<string, AvatarMeta> = {
   'female-avatar5': { file: 'female-avatar5.glb', category: 'w', body: 'F', label: 'Female 5' },
 
   david: { file: 'david.glb', category: 'm', body: 'M', label: 'David' },
-  avatarsdk: {
-    file: 'avatarsdk.glb', category: 'm', body: 'M', label: 'Max (AvatarSDK)',
-    lipsyncScale: 0.5,
-    retarget: {
-      Neck: { z: -0.01, rx: -0.15 },
-      Neck1: { z: -0.01, rx: -0.15 },
-      Neck2: { z: -0.01, rx: -0.15 },
-      LeftShoulder: { rz: -0.3 },
-      RightShoulder: { rz: 0.3 },
-      scaleToEyesLevel: 1.0,
-      origin: { y: -0.1 },
-    },
-    baseline: { headRotateX: -0.04, eyeBlinkLeft: 0.05, eyeBlinkRight: 0.05 },
-  },
   avatar3: { file: 'avatar3.glb', category: 'm', body: 'M', label: 'Avatar 3' },
   'male-avatar1': { file: 'male-avatar1.glb', category: 'm', body: 'M', label: 'Male 1' },
   'male-avatar2': { file: 'male-avatar2.glb', category: 'm', body: 'M', label: 'Male 2' },
