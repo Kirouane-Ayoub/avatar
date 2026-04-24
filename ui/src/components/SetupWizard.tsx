@@ -75,7 +75,6 @@ export function SetupWizard({ setup, onChange, onStart, starting, error }: Props
             <div className="stage-title">{currentAvatar.label}</div>
             <div className="stage-sub">
               {currentAvatar.body === 'F' ? 'female' : 'male'}
-              {currentAvatar.language ? ` · ${currentAvatar.language}` : ''}
               <span className="kbd-hint"> · ← → to cycle</span>
             </div>
           </div>
