@@ -212,8 +212,16 @@ code {
 .th-stage {
   width: 100%;
   height: 100%;
+  /* Promote the canvas to its own compositing layer so overlay repaints
+     don't force the WebGL surface through full re-composition each frame. */
+  contain: strict;
 }
-.th-stage canvas { display: block; width: 100% !important; height: 100% !important; }
+.th-stage canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+  transform: translateZ(0);
+}
 
 .th-status {
   position: absolute;
@@ -678,8 +686,9 @@ code {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  background: rgba(9, 9, 11, 0.7);
-  backdrop-filter: blur(10px);
+  /* Solid-ish bg instead of backdrop-filter: blur over a constantly-
+     repainting WebGL canvas was tanking framerate of the avatar idle. */
+  background: rgba(15, 15, 18, 0.92);
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 999px;
   padding: 3px 8px 3px 4px;
