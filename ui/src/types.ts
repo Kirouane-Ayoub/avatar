@@ -11,7 +11,6 @@ export interface AvatarMeta {
   category: AvatarCategory;
   body: Body;
   label: string;
-  language?: string;
   lipsyncScale?: number;
   retarget?: Record<string, unknown>;
   baseline?: Record<string, number>;
