@@ -126,3 +126,8 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# Node / Vite
+node_modules/
+ui/dist/
+*.tsbuildinfo
