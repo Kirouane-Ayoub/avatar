@@ -1,5 +1,3 @@
-"""Function tools for Lisa voice assistant."""
-
 import logging
 
 from livekit.agents.llm import function_tool

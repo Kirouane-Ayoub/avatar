@@ -1,9 +1,3 @@
-"""Custom LiveKit TTS plugin for Orpheus 3B served via llama.cpp.
-
-Orpheus generates audio as special token IDs via the completions endpoint.
-These tokens are decoded into audio using the SNAC neural audio codec.
-"""
-
 from __future__ import annotations
 
 import json

@@ -1,5 +1,3 @@
-"""LiveKit voice agent: fully local speech-to-speech using Qwen + Kokoro TTS + Faster Whisper."""
-
 import asyncio
 import base64
 import json

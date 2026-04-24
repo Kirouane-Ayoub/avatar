@@ -1,5 +1,3 @@
-"""Custom LiveKit TTS plugin for Kokoro FastAPI server with word timestamps."""
-
 from __future__ import annotations
 
 import base64

@@ -1,10 +1,3 @@
-"""Benchmark each service in the voice pipeline independently.
-
-Usage:
-    python benchmark.py              # run from host (uses localhost URLs)
-    python benchmark.py --rounds 5   # custom number of rounds
-"""
-
 import argparse
 import io
 import json
