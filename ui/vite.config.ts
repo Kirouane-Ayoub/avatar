@@ -25,9 +25,10 @@ export default defineConfig({
     emptyOutDir: true,
     sourcemap: true,
     rollupOptions: {
-      // TalkingHead + three are loaded from the browser import map (see
-      // index.html). Keep them out of the bundle so the CDN modules are used.
-      external: [/^three($|\/)/, 'talkinghead'],
+      // TalkingHead + lipsync-en + three are loaded from the browser import
+      // map (see index.html). Keep them out of the bundle so the CDN modules
+      // are used.
+      external: [/^three($|\/)/, 'talkinghead', 'lipsync-en'],
     },
   },
 });
