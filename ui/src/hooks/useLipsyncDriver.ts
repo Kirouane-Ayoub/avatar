@@ -3,7 +3,11 @@ import type { MutableRefObject } from 'react';
 import type { AvatarMeta } from '../types';
 import type { LipsyncData } from './useSession';
 import { isVowelViseme, kanaViseme } from '../data/kana_viseme';
+import { phonemizeEnglishWord } from '../data/english_phonemes';
 
+// Fallback char→viseme map used only if LipsyncEn (TalkingHead's English
+// phonemizer) hasn't loaded yet. The phonemizer handles silent letters and
+// digraphs properly; this 24-entry table is the legacy approximation.
 const CHAR_VISEME: Record<string, string> = {
   a: 'aa', e: 'E', i: 'I', o: 'O', u: 'U',
   b: 'PP', p: 'PP', m: 'PP',
@@ -62,6 +66,10 @@ export function useLipsyncDriver(
     let wordIdx = 0;
     let charIdx = 0;
     let lastVowelVis = 'aa';
+    // Cache phonemes for the current English word so we phonemize once per
+    // word, not once per frame.
+    let enWordIdx = -1;
+    let enPhonemes: ReturnType<typeof phonemizeEnglishWord> = null;
 
     function tick() {
       if (cancelled) return;
@@ -98,19 +106,41 @@ export function useLipsyncDriver(
             const wDur = wdurations[wordIdx];
 
             if (isEnglish) {
-              const word = words[wordIdx].toLowerCase().replace(/[^a-z]/g, '');
-              if (word.length > 0) {
-                const charDur = wDur / word.length;
-                const target = Math.min(
-                  Math.floor((elapsed - wStart) / charDur),
-                  word.length - 1,
-                );
-                if (target >= 0 && target !== charIdx) charIdx = target;
-                const ch = word[Math.max(0, charIdx)] || '';
-                const vis = CHAR_VISEME[ch] || 'sil';
+              // Phonemize once per word and cache.
+              if (enWordIdx !== wordIdx) {
+                enWordIdx = wordIdx;
+                enPhonemes = phonemizeEnglishWord(words[wordIdx]);
+              }
+
+              const wordElapsed = elapsed - wStart;
+              const t = wDur > 0 ? Math.max(0, Math.min(wordElapsed / wDur, 1)) : 0;
+
+              if (enPhonemes && enPhonemes.visemes.length > 0) {
+                // Find the phoneme whose [start, end) bracket contains t.
+                const { visemes, ends } = enPhonemes;
+                let pi = visemes.length - 1;
+                for (let i = 0; i < visemes.length; i++) {
+                  if (t < ends[i]) { pi = i; break; }
+                }
+                const vis = visemes[pi] || 'sil';
                 ALL_VISEMES.forEach((v) => setMorph(head, 'viseme_' + v, 0));
                 setMorph(head, 'viseme_' + vis, 0.35 * scale);
                 setMorph(head, 'jawOpen', Math.min(level * 2 * scale, 0.3 * scale));
+              } else {
+                // Fallback: char-stepping if phonemizer wasn't available.
+                const word = words[wordIdx].toLowerCase().replace(/[^a-z]/g, '');
+                if (word.length > 0) {
+                  const target = Math.min(
+                    Math.floor(t * word.length),
+                    word.length - 1,
+                  );
+                  if (target >= 0 && target !== charIdx) charIdx = target;
+                  const ch = word[Math.max(0, charIdx)] || '';
+                  const vis = CHAR_VISEME[ch] || 'sil';
+                  ALL_VISEMES.forEach((v) => setMorph(head, 'viseme_' + v, 0));
+                  setMorph(head, 'viseme_' + vis, 0.35 * scale);
+                  setMorph(head, 'jawOpen', Math.min(level * 2 * scale, 0.3 * scale));
+                }
               }
             } else if (isJapanese) {
               // Array.from properly splits surrogate pairs and combining
