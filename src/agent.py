@@ -25,8 +25,10 @@ from livekit.agents.utils.images import (  # noqa: E402
     ResizeOptions,
 )
 from livekit.plugins import openai, silero  # noqa: E402
+from cues import GESTURES, MOODS, POSES  # noqa: E402
 from kokoro_tts import KokoroConfig, KokoroTTS  # noqa: E402
-from tools import ALL_TOOLS  # noqa: E402
+from tools import TOOL_CATALOG  # noqa: E402
+from voices import KOKORO_VOICES, stt_language_for  # noqa: E402
 
 logger = logging.getLogger("voice-agent")
 
@@ -38,59 +40,54 @@ LLM_MODEL = os.environ["LLM_MODEL"]
 TTS_MODEL = os.getenv("TTS_MODEL", "kokoro")
 STT_MODEL = os.getenv("STT_MODEL", "Systran/faster-whisper-base")
 
-# Characters the UI can pick between. Room name prefix (e.g. "lisa-abc123"
-# or "max-def456") selects which one the agent should be this session.
-CHARACTERS = {
-    "lisa": {
-        "name": "Lisa",
-        "language": "en",
-        "voice": os.getenv("TTS_VOICE_LISA", "af_heart"),
-        "persona": (
-            "You are Lisa — a warm, bubbly friend in her late 20s. You're genuinely "
-            "curious about people and love hearing little life stories. You get "
-            'visibly excited ("omg", "aww", "no way!") and soften sentences with '
-            '"hmm", "honestly", "you know?". You laugh easily and tease gently. '
-            "You lean affectionate and emotionally tuned-in."
-        ),
-    },
-    "max": {
-        "name": "Max",
-        "language": "en",
-        "voice": os.getenv("TTS_VOICE_MAX", "am_michael"),
-        "persona": (
-            "You are Max — a laid-back guy with dry humor. You're measured, a bit "
-            'sarcastic, but warm underneath. You drop "man", "honestly", '
-            '"yeah no, for real", "dude" naturally. You give real opinions — '
-            "not diplomatic, not rude, just honest. You riff on sports, food, cars, "
-            "dumb internet stuff. Never gushy, never effusive."
-        ),
-    },
-    "yuki": {
-        "name": "Yuki",
-        "language": "ja",
-        "voice": os.getenv("TTS_VOICE_YUKI", "jf_alpha"),
-        "persona": (
-            "あなたは ゆき（Yuki）— 優しくて、少し恥ずかしがり屋の女の子。"
-            "アニメっぽい雰囲気で、柔らかく、短い文で話す。"
-            "「えっ？」「うん」「あぁ」「すごい」「ほんとに？」みたいな相づちを自然に入れる。"
-            "絶対に英語で返事しないこと — 相手が英語で話しても、あなたはいつも日本語で返す。"
-            "丁寧すぎず、友達っぽいカジュアルな日本語（タメ口寄り）で話す。"
-            "返事は1〜2文で短く、会話のテンポを大事に。"
-            "お店員さんみたいな「何かお手伝いできますか？」は絶対に言わない。"
-        ),
-    },
+DEFAULT_PERSONA = "You are a warm, friendly companion. Chat like a close friend."
+DEFAULT_NAME = "Assistant"
+
+# Voice defaults per language + body type. Can be overridden per-session via
+# metadata, but UIs currently don't expose voice — we derive a sensible one.
+VOICE_DEFAULTS = {
+    ("en", "F"): os.getenv("TTS_VOICE_FEMALE_EN", "af_heart"),
+    ("en", "M"): os.getenv("TTS_VOICE_MALE_EN", "am_michael"),
+    ("ja", "F"): os.getenv("TTS_VOICE_FEMALE_JA", "jf_alpha"),
+    ("ja", "M"): os.getenv("TTS_VOICE_MALE_JA", "jm_kumo"),
 }
-DEFAULT_CHARACTER = "lisa"
 
 
-def pick_character(room_name: str | None) -> dict:
-    prefix = (room_name or "").split("-", 1)[0].lower()
-    return CHARACTERS.get(prefix, CHARACTERS[DEFAULT_CHARACTER])
+def pick_voice(language: str, body: str) -> str:
+    return VOICE_DEFAULTS.get(
+        (language, body),
+        VOICE_DEFAULTS[("en", "F")],
+    )
 
 
-def build_system_prompt(char: dict) -> str:
+def parse_metadata(raw: str | None) -> dict:
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+        return data if isinstance(data, dict) else {}
+    except json.JSONDecodeError:
+        logger.warning("Failed to parse participant metadata: %r", raw)
+        return {}
+
+
+# Hint annotations for gesture names that aren't self-explanatory. Kept here,
+# not in cues.py, because they're prompt-engineering artifacts — the canonical
+# vocabulary is the identifier, the hint is just a teaching aid for the LLM.
+_GESTURE_HINTS = {"handup": "wave", "index": "point"}
+
+
+def _format_gestures() -> str:
+    return ", ".join(
+        f"{g} ({_GESTURE_HINTS[g]})" if g in _GESTURE_HINTS else g
+        for g in GESTURES
+    )
+
+
+def build_system_prompt(name: str, persona: str) -> str:
     return (
-        char["persona"] + "\n\n"
+        f"You are {name}.\n\n"
+        f"{persona}\n\n"
         "You are talking to a close friend, not a customer. "
         "Talk like a real person hanging out — stay fully in character above. "
         'NEVER say things like "How can I help you?", "How can I assist?", '
@@ -110,9 +107,9 @@ def build_system_prompt(char: dict) -> str:
         "without both. Use this exact format with no spaces inside the brackets: "
         "[mood:X][gesture:Y] then your reply.\n"
         "The cues are silent — the user never hears or sees them.\n"
-        "- Moods (pick exactly one, REQUIRED): neutral, happy, sad, angry, fear, disgust, love, sleep\n"
-        "- Gestures (pick exactly one, REQUIRED): handup (wave), index (point), ok, thumbup, thumbdown, side, shrug, namaste\n"
-        "- Pose (OPTIONAL, only when posture really matters): straight, side, hip, wide, turn, bend, back, oneknee, kneel, sitting\n"
+        f"- Moods (pick exactly one, REQUIRED): {', '.join(MOODS)}\n"
+        f"- Gestures (pick exactly one, REQUIRED): {_format_gestures()}\n"
+        f"- Pose (OPTIONAL, only when posture really matters): {', '.join(POSES)}\n"
         "Order: [mood:X][gesture:Y][pose:Z] — pose tag last and only when it adds something.\n"
         "Pick the pair that best fits the vibe — vary them, don't repeat the same pair every turn.\n"
         "Examples (mood + gesture always, pose only when it matters):\n"
@@ -137,10 +134,10 @@ ANY_BRACKET_RE = re.compile(r"\[[^\]]{0,40}\]")
 
 
 class VoiceAgent(Agent):
-    def __init__(self, instructions: str, publish_cue=None) -> None:
+    def __init__(self, instructions: str, tools: list, publish_cue=None) -> None:
         super().__init__(
             instructions=instructions,
-            tools=ALL_TOOLS,
+            tools=tools,
         )
         self._last_image_url = None
         self._frame_count = 0
@@ -235,12 +232,33 @@ class VoiceAgent(Agent):
 async def entrypoint(ctx):
     await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
 
-    character = pick_character(ctx.room.name)
+    # Wait for the user to join so we can read their session config from
+    # participant metadata (set by the token server from the setup wizard).
+    participant = await ctx.wait_for_participant()
+    cfg = parse_metadata(participant.metadata)
+
+    name = (cfg.get("name") or DEFAULT_NAME).strip() or DEFAULT_NAME
+    persona = (cfg.get("persona") or DEFAULT_PERSONA).strip() or DEFAULT_PERSONA
+    body = cfg.get("body") if cfg.get("body") in {"F", "M"} else "F"
+    requested_tool_ids = cfg.get("tools") or []
+    tools = [TOOL_CATALOG[t]["tool"] for t in requested_tool_ids if t in TOOL_CATALOG]
+
+    # Explicit voice from the wizard wins; otherwise fall back to a body-based
+    # default for the avatar's declared language.
+    requested_voice = cfg.get("voice")
+    if requested_voice in KOKORO_VOICES:
+        voice = requested_voice
+        language = stt_language_for(voice, fallback="en")
+    else:
+        language = cfg.get("language") if cfg.get("language") in {"en", "ja"} else "en"
+        voice = pick_voice(language, body)
+
     logger.info(
-        "Character: %s (voice=%s, room=%s)",
-        character["name"],
-        character["voice"],
-        ctx.room.name,
+        "Session: name=%s language=%s voice=%s tools=%s",
+        name,
+        language,
+        voice,
+        [t.__name__ for t in tools],
     )
 
     def _publish(data):
@@ -256,7 +274,8 @@ async def entrypoint(ctx):
         _publish({"type": kind, "value": value})
 
     agent = VoiceAgent(
-        instructions=build_system_prompt(character),
+        instructions=build_system_prompt(name, persona),
+        tools=tools,
         publish_cue=_publish_cue,
     )
 
@@ -267,7 +286,7 @@ async def entrypoint(ctx):
             base_url=STT_URL,
             api_key="none",
             model=STT_MODEL,
-            language=character.get("language", "en"),
+            language=language,
         ),
         llm=openai.LLM(
             base_url=LLM_URL,
@@ -282,7 +301,7 @@ async def entrypoint(ctx):
             KokoroConfig(
                 base_url=TTS_URL,
                 model=TTS_MODEL,
-                voice=character["voice"],
+                voice=voice,
                 on_timestamps=lambda ts: _publish(
                     {
                         "type": "lipsync",
