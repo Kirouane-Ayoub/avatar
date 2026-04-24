@@ -54,10 +54,6 @@ export const AVATARS: Record<string, AvatarMeta> = {
   'female-avatar3': { file: 'female-avatar3.glb', category: 'w', body: 'F', label: 'Female 3' },
   'female-avatar4': { file: 'female-avatar4.glb', category: 'w', body: 'F', label: 'Female 4' },
   'female-avatar5': { file: 'female-avatar5.glb', category: 'w', body: 'F', label: 'Female 5' },
-  'p-f-a1': { file: 'p-f-a1.glb', category: 'w', body: 'F', label: 'Portrait 1' },
-  'p-f-a2': { file: 'p-f-a2.glb', category: 'w', body: 'F', label: 'Portrait 2' },
-  'p-m-a3': { file: 'p-m-a3.glb', category: 'w', body: 'F', label: 'Portrait 3' },
-  'p-m-a4': { file: 'p-m-a4.glb', category: 'w', body: 'F', label: 'Portrait 4' },
 
   david: { file: 'david.glb', category: 'm', body: 'M', label: 'David' },
   avatarsdk: {
