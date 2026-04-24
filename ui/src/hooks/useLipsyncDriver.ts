@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import type { MutableRefObject } from 'react';
 import type { AvatarMeta } from '../types';
 import type { LipsyncData } from './useSession';
+import { isVowelViseme, kanaViseme } from '../data/kana_viseme';
 
 const CHAR_VISEME: Record<string, string> = {
   a: 'aa', e: 'E', i: 'I', o: 'O', u: 'U',
@@ -48,15 +49,19 @@ export function useLipsyncDriver(
 
     const freqData = new Uint8Array(analyser.frequencyBinCount);
     const scale = avatar.lipsyncScale ?? 1;
-    // English visemes: char→viseme map. Non-English: jaw-only (the English
-    // phoneme map doesn't apply to other languages' mouth shapes).
+    // Per-language strategy:
+    //   en → char→viseme map (CHAR_VISEME)
+    //   ja → kana→viseme map (KANA_VISEME, mora rate)
+    //   *  → jaw-only (amplitude-driven)
     const isEnglish = language === 'en';
+    const isJapanese = language === 'ja';
 
     let cancelled = false;
     let currentData: LipsyncData | null = null;
     let playStart = 0;
     let wordIdx = 0;
     let charIdx = 0;
+    let lastVowelVis = 'aa';
 
     function tick() {
       if (cancelled) return;
@@ -89,18 +94,15 @@ export function useLipsyncDriver(
           }
 
           if (wordIdx < words.length) {
-            if (!isEnglish) {
-              ALL_VISEMES.forEach((v) => setMorph(head, 'viseme_' + v, 0));
-              setMorph(head, 'jawOpen', Math.min(level * 2.5 * scale, 0.4 * scale));
-            } else {
+            const wStart = wtimes[wordIdx];
+            const wDur = wdurations[wordIdx];
+
+            if (isEnglish) {
               const word = words[wordIdx].toLowerCase().replace(/[^a-z]/g, '');
-              const wStart = wtimes[wordIdx];
-              const wDur = wdurations[wordIdx];
               if (word.length > 0) {
                 const charDur = wDur / word.length;
-                const wordElapsed = elapsed - wStart;
                 const target = Math.min(
-                  Math.floor(wordElapsed / charDur),
+                  Math.floor((elapsed - wStart) / charDur),
                   word.length - 1,
                 );
                 if (target >= 0 && target !== charIdx) charIdx = target;
@@ -110,6 +112,29 @@ export function useLipsyncDriver(
                 setMorph(head, 'viseme_' + vis, 0.35 * scale);
                 setMorph(head, 'jawOpen', Math.min(level * 2 * scale, 0.3 * scale));
               }
+            } else if (isJapanese) {
+              // Array.from properly splits surrogate pairs and combining
+              // marks; .length on a string of kana would also work since
+              // they're BMP, but keep this safe.
+              const chars = Array.from(words[wordIdx]);
+              if (chars.length > 0) {
+                const charDur = wDur / chars.length;
+                const target = Math.min(
+                  Math.floor((elapsed - wStart) / charDur),
+                  chars.length - 1,
+                );
+                if (target >= 0 && target !== charIdx) charIdx = target;
+                const ch = chars[Math.max(0, charIdx)] || '';
+                const vis = kanaViseme(ch, lastVowelVis);
+                if (isVowelViseme(vis)) lastVowelVis = vis;
+                ALL_VISEMES.forEach((v) => setMorph(head, 'viseme_' + v, 0));
+                setMorph(head, 'viseme_' + vis, 0.35 * scale);
+                setMorph(head, 'jawOpen', Math.min(level * 2 * scale, 0.3 * scale));
+              }
+            } else {
+              // Other languages — jaw-only.
+              ALL_VISEMES.forEach((v) => setMorph(head, 'viseme_' + v, 0));
+              setMorph(head, 'jawOpen', Math.min(level * 2.5 * scale, 0.4 * scale));
             }
           } else {
             currentData = null;
