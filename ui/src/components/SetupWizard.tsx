@@ -126,24 +126,21 @@ export function SetupWizard({ setup, onChange, onStart, starting, error }: Props
 
             <div className="form-field span-2">
               <label>Abilities</label>
-              <div className="tool-list">
+              <div className="tool-chips">
                 {TOOL_CATALOG.map((t) => {
                   const checked = setup.tools.includes(t.id);
                   return (
-                    <label
+                    <button
                       key={t.id}
-                      className={`tool-opt${checked ? ' checked' : ''}`}
+                      type="button"
+                      className={`tool-chip${checked ? ' on' : ''}`}
+                      title={t.description}
+                      aria-pressed={checked}
+                      onClick={() => toggleTool(t.id)}
                     >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => toggleTool(t.id)}
-                      />
-                      <div>
-                        <div className="t-name">{t.label}</div>
-                        <div className="t-desc">{t.description}</div>
-                      </div>
-                    </label>
+                      <span className="tool-check" aria-hidden />
+                      {t.label}
+                    </button>
                   );
                 })}
               </div>
