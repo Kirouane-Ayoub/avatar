@@ -43,7 +43,7 @@ const VROID_DYNAMIC_BONES: unknown[] = [
 export const AVATARS: Record<string, AvatarMeta> = {
   vroid: {
     file: 'vroid.glb', category: 'a', body: 'F', label: 'Yuki (VRoid)',
-    language: 'ja', lipsyncScale: 2.8,
+    lipsyncScale: 2.8,
     baseline: { headRotateX: -0.1, eyeBlinkLeft: 0.05, eyeBlinkRight: 0.05 },
     modelDynamicBones: VROID_DYNAMIC_BONES,
   },
