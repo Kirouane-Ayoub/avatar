@@ -50,7 +50,10 @@ KOKORO_VOICES = {
     "zf_xiaoyi": {"language": "Mandarin Chinese", "gender": "F", "grade": "D"},
     "zm_yunjian": {"language": "Mandarin Chinese", "gender": "M", "grade": "D"},
     "zm_yunxi": {"language": "Mandarin Chinese", "gender": "M", "grade": "D"},
-    "zm_yunxia": {"language": "Mandarin Chinese", "gender": "M", "grade": "D"},
+    # Upstream files this under zm_ (male) but the voice is actually female —
+    # the name 云霞 (yunxia, "rosy clouds") is overwhelmingly a female given
+    # name in Chinese. Listen-confirmed.
+    "zm_yunxia": {"language": "Mandarin Chinese", "gender": "F", "grade": "D"},
     "zm_yunyang": {"language": "Mandarin Chinese", "gender": "M", "grade": "D"},
     # Spanish
     "ef_dora": {"language": "Spanish", "gender": "F", "grade": ""},
