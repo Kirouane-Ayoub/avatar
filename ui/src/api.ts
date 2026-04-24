@@ -1,5 +1,6 @@
 import type { SessionSetup, TokenResponse, VoiceInfo } from './types';
 import { AVATARS, DEFAULT_AVATAR_KEY } from './data/avatars';
+import { languageFromVoice } from './data/voice_lang';
 
 export async function fetchVoices(): Promise<VoiceInfo[]> {
   const res = await fetch('/api/voices');
@@ -15,11 +16,14 @@ export function voiceSampleUrl(voiceId: string, text: string): string {
 
 export async function requestToken(setup: SessionSetup): Promise<TokenResponse> {
   const avatar = AVATARS[setup.avatar] ?? AVATARS[DEFAULT_AVATAR_KEY];
+  // Voice fully drives language. Any voice works with any avatar; if the
+  // user didn't pick a voice, the agent picks an English default.
+  const language = languageFromVoice(setup.voice, 'en');
   const payload = {
     ...setup,
     voice: setup.voice || null,
     body: avatar.body,
-    language: avatar.language ?? 'en',
+    language,
   };
   const res = await fetch('/api/token', {
     method: 'POST',
