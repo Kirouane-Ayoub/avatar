@@ -47,7 +47,7 @@ def benchmark_livekit(cfg, rounds):
     """Benchmark LiveKit server: HTTP health + WebSocket connect latency."""
     lk_url = cfg.get("livekit_url", "http://localhost:7880")
     ws_url = lk_url.replace("http://", "ws://").replace("https://", "wss://")
-    print(f"\n── LiveKit Server ──")
+    print("\n── LiveKit Server ──")
     print(f"   URL: {lk_url}")
 
     times = []
@@ -59,7 +59,9 @@ def benchmark_livekit(cfg, rounds):
             resp = requests.get(lk_url, timeout=5)
             elapsed = (time.perf_counter() - start) * 1000
             times.append(elapsed)
-            print(f"   [{i+1}/{rounds}] HTTP  {elapsed:>6.1f}ms  status={resp.status_code}")
+            print(
+                f"   [{i+1}/{rounds}] HTTP  {elapsed:>6.1f}ms  status={resp.status_code}"
+            )
         except Exception as e:
             print(f"   [{i+1}/{rounds}] HTTP  ERROR: {e}")
 
@@ -90,7 +92,7 @@ def benchmark_livekit(cfg, rounds):
 def benchmark_stt(cfg, rounds):
     url = cfg["stt_url"]
     model = cfg["stt_model"]
-    print(f"\n── STT (Faster Whisper) ──")
+    print("\n── STT (Faster Whisper) ──")
     print(f"   URL: {url}  Model: {model}")
 
     wav_bytes = generate_sine_wav(duration_s=3.0).read()
@@ -204,7 +206,9 @@ def benchmark_llm(cfg, rounds):
             totals.append(total)
 
             tps = token_count / (total / 1000) if total > 0 and token_count > 0 else 0
-            print(f"   [{i+1}/{rounds}] TTFT={ttft:>6.0f}ms  total={total:>6.0f}ms  {token_count} tok  ~{tps:.0f} tok/s  {full_text!r:.60}")
+            print(
+                f"   [{i+1}/{rounds}] TTFT={ttft:>6.0f}ms  total={total:>6.0f}ms  {token_count} tok  ~{tps:.0f} tok/s  {full_text!r:.60}"
+            )
 
         except Exception as e:
             print(f"   [{i+1}/{rounds}] ERROR: {e}")
@@ -216,7 +220,7 @@ def benchmark_tts(cfg, rounds):
     url = cfg["tts_url"]
     model = cfg["tts_model"]
     voice = cfg["tts_voice"]
-    print(f"\n── TTS (Kokoro) ──")
+    print("\n── TTS (Kokoro) ──")
     print(f"   URL: {url}  Model: {model}  Voice: {voice}")
 
     ttfbs = []
@@ -257,7 +261,9 @@ def benchmark_tts(cfg, rounds):
                 ttfbs.append(ttfb)
             totals.append(total)
 
-            print(f"   [{i+1}/{rounds}] TTFB={ttfb:>6.0f}ms  total={total:>6.0f}ms  audio={audio_dur:.0f}ms  {total_bytes/1024:.0f}KB")
+            print(
+                f"   [{i+1}/{rounds}] TTFB={ttfb:>6.0f}ms  total={total:>6.0f}ms  audio={audio_dur:.0f}ms  {total_bytes/1024:.0f}KB"
+            )
 
         except Exception as e:
             print(f"   [{i+1}/{rounds}] ERROR: {e}")
@@ -272,7 +278,9 @@ def print_stats(label, values):
     mn = min(values)
     mx = max(values)
     p50 = sorted(values)[len(values) // 2]
-    print(f"   {label:>12s}:  avg={avg:>6.0f}ms  min={mn:>6.0f}ms  max={mx:>6.0f}ms  p50={p50:>6.0f}ms")
+    print(
+        f"   {label:>12s}:  avg={avg:>6.0f}ms  min={mn:>6.0f}ms  max={mx:>6.0f}ms  p50={p50:>6.0f}ms"
+    )
 
 
 def main():
@@ -281,7 +289,9 @@ def main():
     parser.add_argument("--livekit-url", default="http://localhost:7880")
     parser.add_argument("--stt-url", default="http://localhost:8000/v1")
     parser.add_argument("--tts-url", default="http://localhost:8880")
-    parser.add_argument("--llm-url", default="http://localhost:8090/v1")
+    parser.add_argument(
+        "--llm-url", default="http://localhost:8090/v1"
+    )
     parser.add_argument("--llm-api-key", default="REDACTED_LLM_API_KEY")
     parser.add_argument("--llm-model", default="qwen3.5-397b")
     parser.add_argument("--stt-model", default="Systran/faster-whisper-tiny.en")
@@ -325,24 +335,33 @@ def main():
     llm_avg = sum(llm_ttfts) / len(llm_ttfts) if llm_ttfts else 0
     tts_avg = sum(tts_ttfbs) / len(tts_ttfbs) if tts_ttfbs else 0
 
-    services = [("LiveKit", lk_avg), ("STT", stt_avg), ("LLM", llm_avg), ("TTS", tts_avg)]
+    services = [
+        ("LiveKit", lk_avg),
+        ("STT", stt_avg),
+        ("LLM", llm_avg),
+        ("TTS", tts_avg),
+    ]
     total = sum(v for _, v in services)
 
     bar_w = 40
+
     def bar(val):
-        if total == 0: return ""
+        if total == 0:
+            return ""
         n = int(round(val / total * bar_w))
         return "#" * n + "." * (bar_w - n)
 
     for name, avg in services:
         pct = (avg / total * 100) if total > 0 else 0
         print(f"   {name:<8s} {avg:>6.0f}ms  [{bar(avg)}]  {pct:.0f}%")
-    print(f"   ─────────────")
+    print("   ─────────────")
     print(f"   Total    {total:>6.0f}ms")
 
     if total > 0:
         bottleneck = max(services, key=lambda x: x[1])
-        print(f"\n   Bottleneck: {bottleneck[0]} ({bottleneck[1]:.0f}ms, {bottleneck[1]/total*100:.0f}% of pipeline)")
+        print(
+            f"\n   Bottleneck: {bottleneck[0]} ({bottleneck[1]:.0f}ms, {bottleneck[1]/total*100:.0f}% of pipeline)"
+        )
 
 
 if __name__ == "__main__":
