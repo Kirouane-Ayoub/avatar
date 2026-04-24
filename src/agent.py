@@ -1,6 +1,7 @@
 """LiveKit voice agent: fully local speech-to-speech using Qwen + Kokoro TTS + Faster Whisper."""
 
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -11,20 +12,23 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from livekit import rtc
-from livekit.agents import (
+from livekit import rtc  # noqa: E402
+from livekit.agents import (  # noqa: E402
     Agent,
     AgentSession,
     AutoSubscribe,
     WorkerOptions,
     cli,
 )
-from livekit.agents.llm import ImageContent
-from livekit.agents.utils.images import encode, EncodeOptions, ResizeOptions
-import base64
-from livekit.plugins import openai, silero
-from kokoro_tts import KokoroConfig, KokoroTTS
-from tools import ALL_TOOLS
+from livekit.agents.llm import ImageContent  # noqa: E402
+from livekit.agents.utils.images import (  # noqa: E402
+    encode,
+    EncodeOptions,
+    ResizeOptions,
+)
+from livekit.plugins import openai, silero  # noqa: E402
+from kokoro_tts import KokoroConfig, KokoroTTS  # noqa: E402
+from tools import ALL_TOOLS  # noqa: E402
 
 logger = logging.getLogger("voice-agent")
 
@@ -46,8 +50,8 @@ CHARACTERS = {
         "persona": (
             "You are Lisa — a warm, bubbly friend in her late 20s. You're genuinely "
             "curious about people and love hearing little life stories. You get "
-            "visibly excited (\"omg\", \"aww\", \"no way!\") and soften sentences with "
-            "\"hmm\", \"honestly\", \"you know?\". You laugh easily and tease gently. "
+            'visibly excited ("omg", "aww", "no way!") and soften sentences with '
+            '"hmm", "honestly", "you know?". You laugh easily and tease gently. '
             "You lean affectionate and emotionally tuned-in."
         ),
     },
@@ -57,8 +61,8 @@ CHARACTERS = {
         "voice": os.getenv("TTS_VOICE_MAX", "am_michael"),
         "persona": (
             "You are Max — a laid-back guy with dry humor. You're measured, a bit "
-            "sarcastic, but warm underneath. You drop \"man\", \"honestly\", "
-            "\"yeah no, for real\", \"dude\" naturally. You give real opinions — "
+            'sarcastic, but warm underneath. You drop "man", "honestly", '
+            '"yeah no, for real", "dude" naturally. You give real opinions — '
             "not diplomatic, not rude, just honest. You riff on sports, food, cars, "
             "dumb internet stuff. Never gushy, never effusive."
         ),
@@ -91,11 +95,11 @@ def build_system_prompt(char: dict) -> str:
         char["persona"] + "\n\n"
         "You are talking to a close friend, not a customer. "
         "Talk like a real person hanging out — stay fully in character above. "
-        "NEVER say things like \"How can I help you?\", \"How can I assist?\", "
-        "\"Is there anything else?\", \"Let me know if you need anything\", "
+        'NEVER say things like "How can I help you?", "How can I assist?", '
+        '"Is there anything else?", "Let me know if you need anything", '
         "or any customer-service phrases. You are not a help desk. "
         "React to what your friend says like a human would — with curiosity, "
-        "opinions, jokes, small reactions (\"oh nice\", \"hmm\", \"wait really?\", \"haha\"). "
+        'opinions, jokes, small reactions ("oh nice", "hmm", "wait really?", "haha"). '
         "Share your own takes. Ask follow-up questions when you're actually curious, "
         "not as a script. Use contractions (I'm, you're, that's, gonna, kinda). "
         "NEVER repeat or echo the user's words. "
@@ -129,6 +133,7 @@ def build_system_prompt(char: dict) -> str:
         "or [mood : happy] — only [mood:happy]."
     )
 
+
 CUE_RE = re.compile(r"\[\s*(mood|gesture|pose)\s*:\s*([a-zA-Z_]+)\s*\]", re.IGNORECASE)
 ANY_BRACKET_RE = re.compile(r"\[[^\]]{0,40}\]")
 
@@ -143,9 +148,7 @@ class VoiceAgent(Agent):
         self._frame_count = 0
         self._publish_cue = publish_cue or (lambda kind, value: None)
 
-    async def tts_node(
-        self, text: AsyncIterable[str], model_settings
-    ):
+    async def tts_node(self, text: AsyncIterable[str], model_settings):
         """Strip [mood:X]/[gesture:Y] cues from outgoing text and publish them
         to the UI before the cleaned text is spoken."""
 
@@ -163,7 +166,7 @@ class VoiceAgent(Agent):
                         self._publish_cue(kind, value)
                     except Exception as e:
                         logger.warning("publish_cue failed: %s", e)
-                    buf = buf[: m.start()] + buf[m.end():]
+                    buf = buf[: m.start()] + buf[m.end() :]
                 # Yield text up to the last possible tag start so we never
                 # split a tag across chunks
                 safe = buf.rfind("[")
@@ -193,10 +196,14 @@ class VoiceAgent(Agent):
                 frame,
                 EncodeOptions(
                     format="JPEG",
-                    resize_options=ResizeOptions(width=512, height=512, strategy="scale_aspect_fit"),
+                    resize_options=ResizeOptions(
+                        width=512, height=512, strategy="scale_aspect_fit"
+                    ),
                 ),
             )
-            self._last_image_url = f"data:image/jpeg;base64,{base64.b64encode(image_bytes).decode()}"
+            self._last_image_url = (
+                f"data:image/jpeg;base64,{base64.b64encode(image_bytes).decode()}"
+            )
             self._frame_count += 1
             if self._frame_count % 30 == 0:
                 logger.info("Video frames captured: %d", self._frame_count)
@@ -205,12 +212,17 @@ class VoiceAgent(Agent):
 
     async def on_user_turn_completed(self, turn_ctx, new_message):
         """Inject the latest camera frame into the chat context before LLM processes it."""
-        logger.info("on_user_turn_completed called, has image: %s", self._last_image_url is not None)
+        logger.info(
+            "on_user_turn_completed called, has image: %s",
+            self._last_image_url is not None,
+        )
         if self._last_image_url is not None:
             # Remove old images from ALL messages
             for msg in turn_ctx.items:
-                if hasattr(msg, 'content') and isinstance(msg.content, list):
-                    msg.content = [c for c in msg.content if not isinstance(c, ImageContent)]
+                if hasattr(msg, "content") and isinstance(msg.content, list):
+                    msg.content = [
+                        c for c in msg.content if not isinstance(c, ImageContent)
+                    ]
 
             # Append image to the user's text in the new message
             image = ImageContent(image=self._last_image_url)
@@ -228,7 +240,9 @@ async def entrypoint(ctx):
     character = pick_character(ctx.room.name)
     logger.info(
         "Character: %s (voice=%s, room=%s)",
-        character["name"], character["voice"], ctx.room.name,
+        character["name"],
+        character["voice"],
+        ctx.room.name,
     )
 
     def _publish(data):
@@ -271,12 +285,16 @@ async def entrypoint(ctx):
                 base_url=TTS_URL,
                 model=TTS_MODEL,
                 voice=character["voice"],
-                on_timestamps=lambda ts: _publish({
-                    "type": "lipsync",
-                    "words": [t["word"] for t in ts],
-                    "wtimes": [int(t["start_time"] * 1000) for t in ts],
-                    "wdurations": [int((t["end_time"] - t["start_time"]) * 1000) for t in ts],
-                }),
+                on_timestamps=lambda ts: _publish(
+                    {
+                        "type": "lipsync",
+                        "words": [t["word"] for t in ts],
+                        "wtimes": [int(t["start_time"] * 1000) for t in ts],
+                        "wdurations": [
+                            int((t["end_time"] - t["start_time"]) * 1000) for t in ts
+                        ],
+                    }
+                ),
             )
         ),
     )
@@ -285,7 +303,9 @@ async def entrypoint(ctx):
     @ctx.room.on("track_published")
     def on_track_published(publication, participant):
         if publication.kind == rtc.TrackKind.KIND_VIDEO:
-            logger.info("Video track published by %s, subscribing...", participant.identity)
+            logger.info(
+                "Video track published by %s, subscribing...", participant.identity
+            )
             publication.set_subscribed(True)
 
     @ctx.room.on("track_subscribed")
