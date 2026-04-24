@@ -23,7 +23,7 @@ declare global {
     new (container: HTMLElement, options: Record<string, unknown>): TalkingHeadInstance;
   }
 
-  interface LipsyncEnInstance {
+  interface LipsyncModuleInstance {
     wordsToVisemes(word: string): {
       words: string;
       visemes: string[];
@@ -33,12 +33,19 @@ declare global {
     };
   }
 
-  interface LipsyncEnConstructor {
-    new (): LipsyncEnInstance;
+  interface LipsyncModuleConstructor {
+    new (): LipsyncModuleInstance;
   }
+
+  // Aliases per language module — same shape, different phonemization rules.
+  interface LipsyncEnInstance extends LipsyncModuleInstance {}
+  interface LipsyncEnConstructor extends LipsyncModuleConstructor {}
+  interface LipsyncFrInstance extends LipsyncModuleInstance {}
+  interface LipsyncFrConstructor extends LipsyncModuleConstructor {}
 
   interface Window {
     TalkingHead?: TalkingHeadConstructor;
     LipsyncEn?: LipsyncEnConstructor;
+    LipsyncFr?: LipsyncFrConstructor;
   }
 }
