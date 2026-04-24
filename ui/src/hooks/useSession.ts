@@ -52,10 +52,18 @@ export interface SessionState {
   setMicMuted: (muted: boolean) => void;
   cameraOn: boolean;
   setCameraOn: (on: boolean) => Promise<void>;
+  whisperMode: boolean;
+  setWhisperMode: (on: boolean) => void;
   disconnect: () => void;
 }
 
 const CUE_TAG_RE = /\[\s*(mood|gesture|pose)\s*:\s*[a-zA-Z_]+\s*\]\s*/gi;
+
+// Whisper mode multiplies mic gain ~2.5× (≈+8 dB) on top of the browser's
+// AGC and disables noiseSuppression (which otherwise filters whispers as
+// "noise"). Below ~3.5× the AGC stays clip-safe in normal speech rooms.
+const WHISPER_GAIN = 2.5;
+const NORMAL_GAIN = 1.0;
 
 export function useSession(
   args: SessionArgs | null,
@@ -69,9 +77,13 @@ export function useSession(
   const [cameraPreview, setCameraPreview] = useState<MediaStream | null>(null);
   const [micMuted, setMicMutedState] = useState(false);
   const [cameraOn, setCameraOnState] = useState(false);
+  const [whisperMode, setWhisperModeState] = useState(false);
 
   const roomRef = useRef<Room | null>(null);
   const camIdRef = useRef<string | null>(null);
+  const rawMicStreamRef = useRef<MediaStream | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const gainRef = useRef<GainNode | null>(null);
   const handlersRef = useRef(handlers);
   handlersRef.current = handlers;
 
@@ -90,6 +102,24 @@ export function useSession(
     if (muted) pub.mute();
     else pub.unmute();
     setMicMutedState(muted);
+  };
+
+  const setWhisperMode = (on: boolean) => {
+    setWhisperModeState(on);
+    const gain = gainRef.current;
+    if (gain) {
+      gain.gain.setValueAtTime(
+        on ? WHISPER_GAIN : NORMAL_GAIN,
+        gain.context.currentTime,
+      );
+    }
+    // Suppression filters whispers as "noise" — flip it off in whisper mode.
+    const rawTrack = rawMicStreamRef.current?.getAudioTracks()[0];
+    if (rawTrack) {
+      rawTrack.applyConstraints({ noiseSuppression: !on }).catch(() => {
+        /* not all browsers support runtime constraint changes */
+      });
+    }
   };
 
   const setCameraOn = async (on: boolean) => {
@@ -119,9 +149,7 @@ export function useSession(
     if (!args) return;
 
     let cancelled = false;
-    const room = new Room({
-      audioCaptureDefaults: { autoGainControl: true, noiseSuppression: true },
-    });
+    const room = new Room();
     roomRef.current = room;
     setStatus('connecting');
     setError(null);
@@ -131,6 +159,7 @@ export function useSession(
     setCameraPreview(null);
     setMicMutedState(false);
     setCameraOnState(false);
+    setWhisperModeState(false);
     camIdRef.current = args.camId;
 
     const attachedEls: HTMLMediaElement[] = [];
@@ -230,9 +259,39 @@ export function useSession(
       try {
         await room.connect(args.url, args.token);
         if (cancelled) return;
-        await room.localParticipant.setMicrophoneEnabled(true, {
-          deviceId: args.micId ? { exact: args.micId } : undefined,
+
+        // Mic: get raw stream → WebAudio gain stage → publish processed track.
+        // The gain node lets whisper mode multiply mic level live without a
+        // republish. AGC stays on (browser-side) for normal-volume normalization;
+        // gain is layered on top.
+        const rawStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            deviceId: args.micId ? { exact: args.micId } : undefined,
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
         });
+        if (cancelled) {
+          rawStream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        rawMicStreamRef.current = rawStream;
+
+        const audioCtx = new AudioContext();
+        audioCtxRef.current = audioCtx;
+        const source = audioCtx.createMediaStreamSource(rawStream);
+        const gain = audioCtx.createGain();
+        gain.gain.value = NORMAL_GAIN;
+        const dest = audioCtx.createMediaStreamDestination();
+        source.connect(gain).connect(dest);
+        gainRef.current = gain;
+
+        const processedTrack = dest.stream.getAudioTracks()[0];
+        await room.localParticipant.publishTrack(processedTrack, {
+          source: Track.Source.Microphone,
+        });
+
         if (args.cameraWanted) {
           await room.localParticipant.setCameraEnabled(true, {
             deviceId: args.camId ? { exact: args.camId } : undefined,
@@ -256,6 +315,11 @@ export function useSession(
       cancelled = true;
       try { room.disconnect(); } catch { /* ignore */ }
       attachedEls.forEach((el) => el.remove());
+      rawMicStreamRef.current?.getTracks().forEach((t) => t.stop());
+      rawMicStreamRef.current = null;
+      audioCtxRef.current?.close().catch(() => { /* ignore */ });
+      audioCtxRef.current = null;
+      gainRef.current = null;
       roomRef.current = null;
     };
   }, [args]);
@@ -271,6 +335,8 @@ export function useSession(
     setMicMuted,
     cameraOn,
     setCameraOn,
+    whisperMode,
+    setWhisperMode,
     disconnect,
   };
 }
