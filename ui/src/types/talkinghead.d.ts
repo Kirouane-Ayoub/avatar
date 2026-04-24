@@ -23,7 +23,22 @@ declare global {
     new (container: HTMLElement, options: Record<string, unknown>): TalkingHeadInstance;
   }
 
+  interface LipsyncEnInstance {
+    wordsToVisemes(word: string): {
+      words: string;
+      visemes: string[];
+      times: number[];
+      durations: number[];
+      i?: number;
+    };
+  }
+
+  interface LipsyncEnConstructor {
+    new (): LipsyncEnInstance;
+  }
+
   interface Window {
     TalkingHead?: TalkingHeadConstructor;
+    LipsyncEn?: LipsyncEnConstructor;
   }
 }
