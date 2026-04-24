@@ -232,6 +232,18 @@ export function SessionView({ setup, avatar, connection, onExit }: Props) {
           <div className="side-actions">
             <button
               type="button"
+              className={`whisper-pill${session.whisperMode ? ' on' : ''}`}
+              onClick={() => session.setWhisperMode(!session.whisperMode)}
+              disabled={session.status !== 'connected'}
+              title={session.whisperMode
+                ? 'Whisper mode on — mic gain ×2.5, suppression off'
+                : 'Whisper mode'}
+              aria-pressed={session.whisperMode}
+            >
+              Whisper
+            </button>
+            <button
+              type="button"
               className={`icon-btn${session.micMuted ? ' off' : ' on'}`}
               onClick={() => session.setMicMuted(!session.micMuted)}
               disabled={session.status !== 'connected'}
