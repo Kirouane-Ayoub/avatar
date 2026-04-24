@@ -48,10 +48,29 @@ async def internal_search(query: str) -> str:
     return f"(internal_search not implemented yet — would search for: {query})"
 
 
-# Collect all tools into a list for easy import
-ALL_TOOLS = [
-    calculate,
-    set_reminder,
-    online_search,
-    internal_search,
-]
+# Catalog drives both the setup-wizard checkboxes (UI) and the agent's tool
+# filter. Keep ids in sync with TOOL_CATALOG in ui/index.html.
+TOOL_CATALOG = {
+    "calculate": {
+        "tool": calculate,
+        "label": "Calculator",
+        "description": "Basic math",
+    },
+    "set_reminder": {
+        "tool": set_reminder,
+        "label": "Reminders",
+        "description": "Set timers / reminders",
+    },
+    "online_search": {
+        "tool": online_search,
+        "label": "Web search",
+        "description": "Public web search",
+    },
+    "internal_search": {
+        "tool": internal_search,
+        "label": "Internal search",
+        "description": "Private docs / knowledge base",
+    },
+}
+
+ALL_TOOLS = [entry["tool"] for entry in TOOL_CATALOG.values()]
