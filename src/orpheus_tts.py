@@ -76,7 +76,7 @@ class OrpheusTTS(tts.TTS):
         if not token.endswith(">"):
             return None
         try:
-            number = int(token[len(prefix):-1])
+            number = int(token[len(prefix) : -1])
             token_id = number - 10 - ((index % 7) * 4096)
             return token_id if token_id > 0 else None
         except (ValueError, IndexError):
@@ -134,7 +134,6 @@ async def _stream_sse_tokens(url: str, payload: dict) -> tuple[list[int], int]:
     """
     buffer: list[int] = []
     count = 0
-    audio_chunks: list[bytes] = []
 
     async with aiohttp.ClientSession() as session:
         async with session.post(
@@ -223,7 +222,11 @@ class ChunkedStream(tts.ChunkedStream):
         if audio_bytes:
             output_emitter.push(audio_bytes)
 
-        logger.info("Decoded %d tokens into %d bytes of audio", count, len(audio_bytes) if audio_bytes else 0)
+        logger.info(
+            "Decoded %d tokens into %d bytes of audio",
+            count,
+            len(audio_bytes) if audio_bytes else 0,
+        )
 
         output_emitter.flush()
 
