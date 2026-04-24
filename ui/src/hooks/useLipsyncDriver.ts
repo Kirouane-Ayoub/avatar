@@ -32,6 +32,7 @@ export function useLipsyncDriver(
   head: TalkingHeadInstance | null,
   remoteAudio: MediaStream | null,
   avatar: AvatarMeta | null,
+  language: string,
   queueRef: MutableRefObject<LipsyncData[]>,
   enabled: boolean,
 ) {
@@ -47,7 +48,9 @@ export function useLipsyncDriver(
 
     const freqData = new Uint8Array(analyser.frequencyBinCount);
     const scale = avatar.lipsyncScale ?? 1;
-    const isEnglish = !avatar.language || avatar.language === 'en';
+    // English visemes: char→viseme map. Non-English: jaw-only (the English
+    // phoneme map doesn't apply to other languages' mouth shapes).
+    const isEnglish = language === 'en';
 
     let cancelled = false;
     let currentData: LipsyncData | null = null;
@@ -137,5 +140,5 @@ export function useLipsyncDriver(
       }
       queueRef.current = [];
     };
-  }, [head, remoteAudio, avatar, queueRef, enabled]);
+  }, [head, remoteAudio, avatar, language, queueRef, enabled]);
 }
