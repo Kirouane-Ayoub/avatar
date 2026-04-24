@@ -20,7 +20,9 @@ async def calculate(expression: str) -> str:
         return f"Could not calculate: {expression}"
 
 
-@function_tool(description="Set a reminder or timer with a message. Duration in seconds.")
+@function_tool(
+    description="Set a reminder or timer with a message. Duration in seconds."
+)
 async def set_reminder(message: str, seconds: int) -> str:
     """Acknowledge the reminder (actual timer would need background task)."""
     if seconds < 0:
@@ -32,7 +34,9 @@ async def set_reminder(message: str, seconds: int) -> str:
     return f"Reminder set: '{message}' in {seconds} seconds"
 
 
-@function_tool(description="Search the public web for up-to-date information on a topic.")
+@function_tool(
+    description="Search the public web for up-to-date information on a topic."
+)
 async def online_search(query: str) -> str:
     """Stub — to be wired up to a real web search backend later."""
     logger.info("online_search stub called with query=%r", query)
