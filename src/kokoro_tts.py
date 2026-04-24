@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import base64
-import json
 import logging
 import re
 from dataclasses import dataclass
@@ -17,7 +16,9 @@ SAMPLE_RATE = 24000
 
 # Safety net: any bracketed cue tag that slipped past the agent's tts_node
 # filter must NOT be sent to Kokoro, or it would be spoken aloud.
-_BRACKET_TAG_RE = re.compile(r"\[\s*(?:mood|gesture|pose|view)\s*:[^\]]{0,40}\]", re.IGNORECASE)
+_BRACKET_TAG_RE = re.compile(
+    r"\[\s*(?:mood|gesture|pose|view)\s*:[^\]]{0,40}\]", re.IGNORECASE
+)
 
 
 @dataclass
@@ -101,8 +102,11 @@ class KokoroChunkedStream(tts.ChunkedStream):
                         config.on_timestamps(timestamps)
 
                     output_emitter.push(audio_bytes)
-                    logger.info("Got %d bytes audio, %d word timestamps",
-                                len(audio_bytes), len(timestamps))
+                    logger.info(
+                        "Got %d bytes audio, %d word timestamps",
+                        len(audio_bytes),
+                        len(timestamps),
+                    )
                 else:
                     logger.warning("No audio received from Kokoro")
 
