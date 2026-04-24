@@ -62,7 +62,6 @@ export function AvatarPicker({ selected, onSelect }: Props) {
               <div className="rail-card-name">{a.label}</div>
               <div className="rail-card-tag">
                 {CATEGORY_LABEL[a.category].toLowerCase()}
-                {a.language ? ` · ${a.language}` : ''}
               </div>
             </div>
           </button>
