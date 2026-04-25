@@ -17,7 +17,7 @@ from livekit.api import AccessToken, VideoGrants
 # Import the shared voice catalog from src/.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from cues import MOODS  # noqa: E402
-from voices import KOKORO_VOICES  # noqa: E402
+from voices import KOKORO_VOICES, ORPHEUS_VOICES, backend_for  # noqa: E402
 
 load_dotenv()
 
@@ -45,6 +45,8 @@ MAX_SAMPLE_TEXT = 200
 
 TTS_BASE_URL = os.getenv("TTS_BASE_URL", "http://kokoro-tts:8880").rstrip("/")
 TTS_MODEL = os.getenv("TTS_MODEL", "kokoro")
+ORPHEUS_BASE_URL = (os.getenv("ORPHEUS_BASE_URL") or "").rstrip("/")
+ORPHEUS_MODEL = os.getenv("ORPHEUS_MODEL", "orpheus")
 
 # Serialize voice-sample proxy calls so a fast-clicking user can't pile up
 # concurrent Kokoro generations and OOM-kill the container. One concurrent
@@ -111,7 +113,11 @@ def sanitize(body: dict) -> dict:
     tools = [t for t in raw_tools if t in ALLOWED_TOOLS]
     camera = bool(body.get("camera", False))
     avatar = str(body.get("avatar") or "")[:80]
-    voice = body.get("voice") if body.get("voice") in _available_voice_ids() else None
+    requested_voice = body.get("voice")
+    if requested_voice in _available_voice_ids() or requested_voice in ORPHEUS_VOICES:
+        voice = requested_voice
+    else:
+        voice = None
     return {
         "avatar": avatar,
         "name": name,
@@ -141,33 +147,58 @@ class Handler(SimpleHTTPRequestHandler):
     def _handle_voice_sample(self, qs: dict):
         voice = (qs.get("voice", [""])[0] or "").strip()
         text = (qs.get("text", [""])[0] or "").strip()[:MAX_SAMPLE_TEXT]
-        if voice not in _available_voice_ids():
-            self._send_json(400, {"error": "unknown voice"})
-            return
+        backend = backend_for(voice)
+        if backend == "orpheus":
+            if voice not in ORPHEUS_VOICES:
+                self._send_json(400, {"error": "unknown voice"})
+                return
+            if not ORPHEUS_BASE_URL:
+                self._send_json(
+                    501, {"error": "orpheus preview unavailable (ORPHEUS_BASE_URL unset)"}
+                )
+                return
+        else:
+            if voice not in _available_voice_ids():
+                self._send_json(400, {"error": "unknown voice"})
+                return
         if not text:
             text = "Hey there — this is how I sound."
 
         # Back off if too many concurrent samples are already running. The
-        # browser cancels stale requests, but a slow Kokoro can still pile up.
+        # browser cancels stale requests, but a slow TTS can still pile up.
         if not _TTS_SEMAPHORE.acquire(timeout=5):
             self._send_json(503, {"error": "tts busy, try again"})
             return
         try:
-            self._stream_voice_sample(voice, text)
+            self._stream_voice_sample(voice, text, backend)
         finally:
             _TTS_SEMAPHORE.release()
 
-    def _stream_voice_sample(self, voice: str, text: str):
-        payload = json.dumps(
-            {
-                "model": TTS_MODEL,
-                "voice": voice,
-                "input": text,
-                "response_format": "mp3",
-            }
-        ).encode()
+    def _stream_voice_sample(self, voice: str, text: str, backend: str):
+        if backend == "orpheus":
+            base_url = ORPHEUS_BASE_URL
+            model = ORPHEUS_MODEL  # full HF id, e.g. mlx-community/orpheus-...
+            response_format = "wav"  # mlx-audio returns a buffered WAV when stream is unset
+        else:
+            base_url = TTS_BASE_URL
+            model = TTS_MODEL
+            response_format = "mp3"
+        payload_obj = {
+            "model": model,
+            "voice": voice,
+            "input": text,
+            "response_format": response_format,
+        }
+        if backend == "orpheus":
+            # Match the Orpheus model card's recommended sampling params; the
+            # mlx-audio server's defaults (temperature=0.7, top_p=0.95,
+            # repetition_penalty=1.0) produce noticeably worse audio.
+            payload_obj.update(
+                {"temperature": 0.6, "top_p": 0.8, "repetition_penalty": 1.3}
+            )
+        payload = json.dumps(payload_obj).encode()
         req = urllib.request.Request(
-            f"{TTS_BASE_URL}/v1/audio/speech",
+            f"{base_url}/v1/audio/speech",
             data=payload,
             headers={"Content-Type": "application/json"},
             method="POST",
@@ -238,12 +269,19 @@ class Handler(SimpleHTTPRequestHandler):
             self._send_json(405, {"error": "use POST /api/token with a JSON body"})
             return
         if parsed.path == "/api/voices":
-            # Only expose voices the running Kokoro image actually has.
+            # Kokoro voices are intersected with what the running Kokoro image
+            # actually has; Orpheus voices are exposed unconditionally — the
+            # agent will fail loudly at session start if ORPHEUS_BASE_URL is
+            # missing, but we don't probe for Orpheus from the token server.
             available = _available_voice_ids()
             voices = [
-                {"id": vid, **meta}
+                {"id": vid, "backend": "kokoro", **meta}
                 for vid, meta in KOKORO_VOICES.items()
                 if vid in available
+            ]
+            voices += [
+                {"id": vid, "backend": "orpheus", **meta}
+                for vid, meta in ORPHEUS_VOICES.items()
             ]
             self._send_json(200, {"voices": voices})
             return
