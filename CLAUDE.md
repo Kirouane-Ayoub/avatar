@@ -4,21 +4,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-BRO is a real-time speech-to-speech voice agent named **Lisa**, built with LiveKit. It features a 3D animated avatar with lip sync, vision capabilities (camera input), function calling (tools), and latency metrics. The pipeline: User speaks → STT (Faster Whisper) → LLM (Qwen 3.5, OpenAI-compatible) → TTS (Kokoro with word timestamps) → Avatar lip sync + audio playback.
+Avatar is a real-time speech-to-speech voice agent named **Lisa**, built with LiveKit. The name is a nod to the Hollywood craft of dubbing voice and sound onto a face that's already moving — which is literally what the lipsync + TTS pipeline does. It features a 3D animated avatar with lip sync, vision capabilities (camera input), function calling (tools), and latency metrics. The pipeline: User speaks → STT (Faster Whisper) → LLM (default `mlx-community/Qwen3.6-27B-4bit` running natively via `mlx_lm.server`, OpenAI-compatible) → TTS (Kokoro for word-timestamped lipsync, or Orpheus via `mlx-audio` for higher quality) → Avatar lip sync + audio playback.
 
 ## Running
 
 ```bash
-# Full stack via Docker Compose
-docker-compose up --build
-# UI at http://localhost:3000
-
-# Management script
+# Recommended: use the management script — sources .env, brings up the host-side
+# MLX LLM (and optionally Orpheus TTS) plus the Docker stack in the right order.
 ./run.sh start|stop|restart|status|logs
 
-# If using local MLX LLM (Mac Metal GPU)
-./start-llm.sh                    # Terminal 1 (port 8090)
-docker-compose up                 # Terminal 2
+# Include Orpheus TTS (host-side mlx-audio with Metal):
+ORPHEUS=1 ./run.sh start
+
+# Just the Docker stack (Kokoro-only, no host MLX):
+docker-compose up --build         # UI at http://localhost:3000
 
 # UI dev server (Vite, with proxy to server.py on :3000)
 cd ui && npm run dev              # :5173, hot reload
@@ -29,6 +28,22 @@ cd ui && npm run build            # Production build → ui/dist
 python benchmark.py --rounds 5
 ```
 
+## Host-side dependencies (one-time)
+
+MLX servers run natively on the Mac so they can use Metal. Install via `uv`:
+
+```bash
+# Chat LLM
+uv tool install mlx-lm
+
+# Orpheus TTS — mlx-audio's pyproject is missing several runtime deps, so
+# inject them explicitly. WITHOUT --with the server crashes on import.
+uv tool install --with 'uvicorn[standard]' --with fastapi \
+  --with python-multipart --with webrtcvad-wheels mlx-audio
+```
+
+`run.sh:start_orpheus` checks for `mlx_audio.server` on PATH and prints this exact command if it's missing.
+
 ## Architecture
 
 **Agent** (`src/agent.py`): LiveKit `Agent` subclass. Connects STT, LLM, TTS. Handles vision by capturing video frames → encoding to JPEG → injecting as `ImageContent` into the LLM chat context via `on_user_turn_completed`. Publishes metrics and lip sync word timestamps to the UI via LiveKit DataChannel (topic: `"metrics"`). System prompt includes the canonical cue vocabulary from `src/cues.py`.
@@ -37,9 +52,9 @@ python benchmark.py --rounds 5
 
 **TTS** (`src/kokoro_tts.py`): Custom LiveKit TTS plugin. Uses Kokoro's `/dev/captioned_speech` endpoint which returns audio (base64 PCM) + **word-level** timestamps. Phoneme-level timing exists in Kokoro internals but the FastAPI wrapper collapses it before serializing — see `Lipsync` section below for how the UI compensates client-side. The regular `/v1/audio/speech` endpoint does NOT provide timestamps.
 
-**Orpheus TTS** (`src/orpheus_tts.py`): Alternative TTS via host-side [`mlx-audio`](https://github.com/Blaizzy/mlx-audio) — runs the Orpheus 3B model on Metal end-to-end (autoregressive token generation **and** SNAC decode). The agent (in Docker) talks to the native daemon at `http://host.docker.internal:5005/v1/audio/speech` with `stream: true, response_format: "pcm"` so int16 LE bytes arrive without a RIFF header to skip. The client coalesces TCP arrivals into 4800-byte (100 ms) frames and pushes them through LiveKit's segment-based emitter. No word timestamps (lipsync falls back to jaw-only via `useLipsyncDriver.ts`). Activated per-session by selecting an Orpheus voice; backend routing via `voices.py:backend_for(voice)`. The English fine-tune (`mlx-community/orpheus-3b-0.1-ft-6bit`) covers the canonical eight voices (`tara, leah, jess, leo, dan, mia, zac, zoe`); multilingual voices in the catalog require swapping `ORPHEUS_MODEL` to a language-specific repo (per-voice model mapping not yet wired). Bring up with `ORPHEUS=1 ./run.sh start`. Was previously a triple of Docker services (`orpheus-tts` wrapper + `orpheus-llama-cpp` + `orpheus-model-init`); moved native because Docker on macOS has no Metal.
+**Orpheus TTS** (`src/orpheus_tts.py`): Alternative TTS via host-side [`mlx-audio`](https://github.com/Blaizzy/mlx-audio) — runs the Orpheus 3B model on Metal end-to-end (autoregressive token generation **and** SNAC decode). The agent (in Docker) talks to the native daemon at `http://host.docker.internal:5005/v1/audio/speech` with `stream: true, response_format: "pcm"` so int16 LE bytes arrive without a RIFF header to skip. The client coalesces TCP arrivals into 4800-byte (100 ms) frames and pushes them through LiveKit's segment-based emitter (`output_emitter.initialize(stream=True)` + `start_segment` / `end_segment` — required for multi-push reframing; without `stream=True` audio sounds "token-by-token" choppy). No word timestamps (lipsync falls back to jaw-only via `useLipsyncDriver.ts`). Activated per-session by selecting an Orpheus voice; backend routing via `voices.py:backend_for(voice)`. Default model is `mlx-community/orpheus-3b-0.1-ft-4bit` (~1.8 GB, faster); 6bit/8bit available. The English fine-tune covers the canonical eight voices (`tara, leah, jess, leo, dan, mia, zac, zoe`); multilingual voices in the catalog require swapping `ORPHEUS_MODEL` to a language-specific repo (per-voice model mapping not yet wired). Bring up with `ORPHEUS=1 ./run.sh start` — `run.sh` then launches `mlx_audio.server` natively. The model loads lazily on first request (~5–10 s after download). Was previously a triple of Docker services (`orpheus-tts` wrapper + `orpheus-llama-cpp` + `orpheus-model-init`); moved native because Docker on macOS has no Metal.
 
-**Voices** (`src/voices.py`): Kokoro voice catalog. `stt_language_for(voice_id)` derives the language code from the voice prefix (`a/b → en`, `f → fr`, `j → ja`, etc.). Mirrored client-side as `ui/src/data/voice_lang.ts:languageFromVoice()`.
+**Voices** (`src/voices.py`): Two catalogs. `KOKORO_VOICES` is the single-letter-prefix Kokoro set; `ORPHEUS_VOICES` is the (mostly English) Orpheus set with `stt`/`description` per voice. `backend_for(voice)` returns `"kokoro"` or `"orpheus"` and drives the agent's TTS factory. `stt_language_for(voice_id)` derives the Whisper language: prefix lookup for Kokoro, explicit `stt` field for Orpheus. Mirrored client-side as `ui/src/data/voice_lang.ts:languageFromVoice()` (must contain the same Orpheus voice→language map).
 
 **Tools** (`src/tools.py`): Function tools decorated with `@function_tool`. All async. Weather uses wttr.in (no API key). Tools are passed to the `Agent` constructor.
 
@@ -47,7 +62,7 @@ python benchmark.py --rounds 5
 - **Setup wizard** (`SetupWizard.tsx`) — avatar rail, mood, persona, voice picker, abilities chips, device overlay (mic + camera dropdowns + tiny circular cam preview) on the stage-preview.
 - **Session view** (`SessionView.tsx`) — full-bleed avatar stage with status badge + metrics pill + camera self-view bubble; right side panel with chat transcript and call controls (Whisper / Mic / Cam / Leave). Replaces the deprecated `legacy.html` reference monolith.
 
-**Token server** (`ui/server.py`): Serves the React `dist/` (or source tree paths like `/avatar-zoo/`) + `/api/token` endpoint + `/api/voices` (cached intersection of upstream Kokoro voices with our catalog) + `/api/voice-sample` (proxy with concurrency cap). Generates unique room names per session (`lisa-{uuid}`) so disconnect/reconnect always gets a fresh agent.
+**Token server** (`ui/server.py`): Serves the React `dist/` (or source tree paths like `/avatar-zoo/`) + `/api/token` endpoint + `/api/voices` (Kokoro voices intersected with the running Kokoro server, plus Orpheus voices unconditionally — each tagged with `backend: "kokoro" | "orpheus"`) + `/api/voice-sample` (proxy with concurrency cap that backend-routes to the right TTS server). Generates unique room names per session (`lisa-{uuid}`) so disconnect/reconnect always gets a fresh agent.
 
 ## Key Data Flows
 
@@ -99,7 +114,7 @@ Voice fully drives language. `requestToken` (UI) sends `language: languageFromVo
 
 ## Docker Services
 
-All on `bro-network` bridge. Agent reaches services by container name: `livekit-server:7880`, `kokoro-tts:8880`, `speaches:8000`. Browser connects to LiveKit via `LIVEKIT_EXTERNAL_URL` (localhost). LLM is external (not in compose).
+All on `avatar-network` bridge. Agent reaches services by container name: `livekit-server:7880`, `kokoro-tts:8880`, `speaches:8000`. Browser connects to LiveKit via `LIVEKIT_EXTERNAL_URL` (localhost). LLM is external (not in compose).
 
 Kokoro has ONNX CPU optimizations tuned for M4 Pro (4 threads, parallel execution, reduced chunk size for lower TTFB).
 
@@ -107,7 +122,7 @@ Kokoro has ONNX CPU optimizations tuned for M4 Pro (4 threads, parallel executio
 
 ## Environment
 
-All config via `.env`. Required: `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`, `TTS_BASE_URL`, `STT_BASE_URL`. The `enable_thinking: False` is passed to Qwen 3.5 via `extra_body` to disable chain-of-thought reasoning (critical for voice — without it the model generates endless thinking tokens).
+All config via `.env`. Required: `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`, `TTS_BASE_URL`, `STT_BASE_URL`. Optional but used when `ORPHEUS=1`: `ORPHEUS_BASE_URL` (default `http://host.docker.internal:5005`), `ORPHEUS_MODEL` (default `mlx-community/orpheus-3b-0.1-ft-4bit`), `ORPHEUS_PORT`. The `enable_thinking: False` is passed to Qwen via `extra_body` to disable chain-of-thought reasoning (critical for voice — without it the model generates endless thinking tokens). **`run.sh` sources `.env` near the top** so changes to `LLM_MODEL` / `ORPHEUS_MODEL` take effect on the next start; previously the host-side daemons fell through to a hardcoded default and ignored `.env`.
 
 ## Important Gotchas
 
@@ -121,6 +136,14 @@ All config via `.env`. Required: `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_
 - **Avatars need ARKit blendshapes** (~72 morph targets per face mesh) for moods, gestures, and English/French lipsync to do anything. Models with only `mouthOpen` + `mouthSmile` (under ~1.5 MB GLBs are usually a tell) silently fail — `setMood()` and viseme writes are no-ops because the targets don't exist on the mesh.
 - **`backdrop-filter: blur(...)` over the WebGL canvas** (e.g. on overlay glass pills) tanks framerate of the avatar idle, because every canvas repaint forces re-blur of the overlay region. Use solid-ish opaque backgrounds for overlays that float over the TalkingHead canvas, or restrict blur to elements that don't overlap the canvas.
 - **Vite + importmap**: TalkingHead, `lipsync-*` modules, and `three` are loaded from the browser's importmap (in `ui/index.html`) and exposed on `window`. They're externalized in `vite.config.ts` (`external: [/^three($|\/)/, 'talkinghead', /^lipsync-/]`) so the bundler doesn't try to resolve them. New CDN-loaded module → add to externals + importmap + `Window` declaration.
+- **mlx-audio's pyproject is missing runtime deps** (`uvicorn`, `fastapi`, `python-multipart`, `webrtcvad`). A bare `uv tool install mlx-audio` produces a `mlx_audio.server` binary that crashes on import. Use the `--with` form documented in the Host-side dependencies section above.
+- **Orpheus streaming has SNAC chunk-boundary artifacts** ("echo" on words straddling a chunk seam) because mlx-audio's per-chunk decode isn't a sliding window. `OrpheusConfig.streaming_interval` defaults to `2.0` s so most short Lisa replies fit in one chunk → no boundary → no echo. Lowering it to `0.5` s improves TTFB but reintroduces the artifact for any reply >2 s.
+- **Orpheus model loads lazily on first request** — the very first TTS call after starting `mlx_audio.server` triggers a download (if not cached) + an in-RAM load that blocks the FastAPI worker. The agent typically times out and the session ends. Pre-warm with a one-line curl after launch (`POST /v1/audio/speech` with any short text) before pointing the agent at it.
+- **Docker on macOS Colima is starved by default** (4 CPU / 8 GB on M4 Pro). For Orpheus + Kokoro + Whisper to run smoothly, bump to at least `colima start --cpu 8 --memory 24`. Settings persist in `~/.colima/default/colima.yaml`.
+- **`avatar-network` is pinned by name** in `docker-compose.yml` (`networks: avatar-network: name: avatar-network`) so Docker reuses the same network across `up` cycles; without this, profile toggles or interrupted starts left containers holding references to a dead network UUID and caused recurring `failed to set up container networking: network ... not found` errors.
+- **Dockerfile is multi-stage** (`node:20-slim AS ui-builder` → `python:3.11-slim`) so the React bundle is rebuilt inside the image from current source rather than copied from a possibly-stale host `ui/dist/`. Before this, host `ui/dist/` was baked in via `COPY ui/ ui/` and silently drifted behind `src/`.
+- **Use `docker-compose` (hyphen, v1)**, never `docker compose` (space, v2 plugin) — the v2 plugin form fails with `unknown flag` on the user's machine. Same for any docs/scripts you edit.
+- **Use `uv` for Python package management** (`uv tool install` / `uv add` / `uv pip install`) — never `pip` / `pipx` / `python -m venv`.
 
 ## Code Style
 
