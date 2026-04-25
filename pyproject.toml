@@ -1,5 +1,5 @@
 [project]
-name = "bro-voice-agent"
+name = "avatar-voice-agent"
 version = "0.1.0"
 description = "Local speech-to-speech voice agent using LiveKit + Kokoro TTS + Faster Whisper + Qwen"
 requires-python = ">=3.11"
