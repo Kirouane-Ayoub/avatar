@@ -1,3 +1,17 @@
+# ───────── Stage 1: build the React UI bundle ─────────
+FROM node:20-slim AS ui-builder
+WORKDIR /ui
+
+# Cache npm install on lockfile only
+COPY ui/package.json ui/package-lock.json ./
+RUN npm ci
+
+# Build the React/Vite bundle into /ui/dist
+COPY ui/ ./
+RUN npm run build
+
+
+# ───────── Stage 2: Python runtime ─────────
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -18,6 +32,11 @@ RUN pip install --no-cache-dir \
 # 3. Copy source code (only this rebuilds on code changes — fast)
 COPY src/ src/
 COPY ui/ ui/
+
+# 4. Replace the (potentially stale) host-side ui/dist with the freshly
+#    built bundle from stage 1, so the token server always serves the
+#    UI that matches src/.
+COPY --from=ui-builder /ui/dist ui/dist
 
 EXPOSE 3000
 
