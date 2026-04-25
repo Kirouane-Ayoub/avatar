@@ -27,18 +27,28 @@ from livekit.agents.utils.images import (  # noqa: E402
 from livekit.plugins import openai, silero  # noqa: E402
 from cues import GESTURES, MOODS, POSES  # noqa: E402
 from kokoro_tts import KokoroConfig, KokoroTTS  # noqa: E402
+from orpheus_tts import OrpheusConfig, OrpheusTTS  # noqa: E402
 from tools import TOOL_CATALOG  # noqa: E402
-from voices import KOKORO_VOICES, stt_language_for  # noqa: E402
+from voices import (  # noqa: E402
+    backend_for,
+    is_known_voice,
+    stt_language_for,
+)
 
 logger = logging.getLogger("voice-agent")
 
 LLM_URL = os.environ["LLM_BASE_URL"]
 LLM_API_KEY = os.environ["LLM_API_KEY"]
-TTS_URL = os.environ["TTS_BASE_URL"]
+TTS_URL = os.environ["TTS_BASE_URL"]  # Kokoro server
 STT_URL = os.environ["STT_BASE_URL"]
 LLM_MODEL = os.environ["LLM_MODEL"]
 TTS_MODEL = os.getenv("TTS_MODEL", "kokoro")
 STT_MODEL = os.getenv("STT_MODEL", "Systran/faster-whisper-base")
+
+# Optional second TTS backend (llama.cpp + SNAC). Only required when a session
+# picks an Orpheus voice; left unset, Orpheus voices simply won't synthesize.
+ORPHEUS_URL = os.getenv("ORPHEUS_BASE_URL")
+ORPHEUS_MODEL = os.getenv("ORPHEUS_MODEL", "orpheus")
 
 DEFAULT_PERSONA = "You are a warm, friendly companion. Chat like a close friend."
 DEFAULT_NAME = "Assistant"
@@ -84,7 +94,36 @@ def _format_gestures() -> str:
     )
 
 
-def build_system_prompt(name: str, persona: str) -> str:
+# Inline vocal emotion tags supported by Orpheus-FastAPI. Synthesized as
+# actual sounds (not spoken words). Only added to the system prompt when the
+# session uses an Orpheus voice — Kokoro would speak them literally.
+ORPHEUS_EMOTION_TAGS = (
+    "laugh",
+    "sigh",
+    "chuckle",
+    "cough",
+    "sniffle",
+    "groan",
+    "yawn",
+    "gasp",
+)
+
+
+def _orpheus_emotion_block() -> str:
+    tags = ", ".join(f"<{t}>" for t in ORPHEUS_EMOTION_TAGS)
+    return (
+        "\n\n"
+        "You can also weave inline VOCAL EMOTION TAGS into your reply — these "
+        "render as actual sounds, not spoken words. Use them sparingly (at "
+        "most one per reply, only when it really fits the moment), never "
+        "back-to-back, and never in place of the [mood]/[gesture] cues.\n"
+        f"Available tags: {tags}.\n"
+        'Example: "well, that\'s actually pretty interesting <laugh> i hadn\'t '
+        'thought of it that way."'
+    )
+
+
+def build_system_prompt(name: str, persona: str, backend: str = "kokoro") -> str:
     return (
         f"You are {name}.\n\n"
         f"{persona}\n\n"
@@ -126,6 +165,7 @@ def build_system_prompt(name: str, persona: str) -> str:
         "  [mood:sad][gesture:side][pose:oneknee] hey... come here, you good?\n"
         "NEVER skip the cues. NEVER use spaces inside brackets. NEVER write [Mood: happy] "
         "or [mood : happy] — only [mood:happy]."
+        + (_orpheus_emotion_block() if backend == "orpheus" else "")
     )
 
 
@@ -246,18 +286,21 @@ async def entrypoint(ctx):
     # Explicit voice from the wizard wins; otherwise fall back to a body-based
     # default for the avatar's declared language.
     requested_voice = cfg.get("voice")
-    if requested_voice in KOKORO_VOICES:
+    if is_known_voice(requested_voice):
         voice = requested_voice
         language = stt_language_for(voice, fallback="en")
     else:
         language = cfg.get("language") if cfg.get("language") in {"en", "ja"} else "en"
         voice = pick_voice(language, body)
 
+    backend = backend_for(voice)
+
     logger.info(
-        "Session: name=%s language=%s voice=%s tools=%s",
+        "Session: name=%s language=%s voice=%s backend=%s tools=%s",
         name,
         language,
         voice,
+        backend,
         [t.__name__ for t in tools],
     )
 
@@ -274,10 +317,45 @@ async def entrypoint(ctx):
         _publish({"type": kind, "value": value})
 
     agent = VoiceAgent(
-        instructions=build_system_prompt(name, persona),
+        instructions=build_system_prompt(name, persona, backend=backend),
         tools=tools,
         publish_cue=_publish_cue,
     )
+
+    def _on_kokoro_timestamps(ts):
+        _publish(
+            {
+                "type": "lipsync",
+                "words": [t["word"] for t in ts],
+                "wtimes": [int(t["start_time"] * 1000) for t in ts],
+                "wdurations": [
+                    int((t["end_time"] - t["start_time"]) * 1000) for t in ts
+                ],
+            }
+        )
+
+    if backend == "orpheus":
+        if not ORPHEUS_URL:
+            raise RuntimeError(
+                f"Voice {voice!r} requires the Orpheus backend, but "
+                "ORPHEUS_BASE_URL is not set."
+            )
+        tts_engine = OrpheusTTS(
+            OrpheusConfig(
+                base_url=ORPHEUS_URL,
+                model=ORPHEUS_MODEL,
+                voice=voice,
+            )
+        )
+    else:
+        tts_engine = KokoroTTS(
+            KokoroConfig(
+                base_url=TTS_URL,
+                model=TTS_MODEL,
+                voice=voice,
+                on_timestamps=_on_kokoro_timestamps,
+            )
+        )
 
     session = AgentSession(
         min_endpointing_delay=0.3,
@@ -297,23 +375,7 @@ async def entrypoint(ctx):
                 "chat_template_kwargs": {"enable_thinking": False},
             },
         ),
-        tts=KokoroTTS(
-            KokoroConfig(
-                base_url=TTS_URL,
-                model=TTS_MODEL,
-                voice=voice,
-                on_timestamps=lambda ts: _publish(
-                    {
-                        "type": "lipsync",
-                        "words": [t["word"] for t in ts],
-                        "wtimes": [int(t["start_time"] * 1000) for t in ts],
-                        "wdurations": [
-                            int((t["end_time"] - t["start_time"]) * 1000) for t in ts
-                        ],
-                    }
-                ),
-            )
-        ),
+        tts=tts_engine,
     )
 
     # Manually subscribe to video tracks (audio is handled by AUDIO_ONLY)
