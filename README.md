@@ -1,13 +1,13 @@
-# BRO - Voice Agent
+# Avatar — Voice Agent
 
-A fully local, real-time speech-to-speech voice agent built with LiveKit.
+A fully local, real-time speech-to-speech voice agent built with LiveKit. The name is a nod to the Hollywood craft of Avatar: dubbing voice and sound onto a face that's already moving — which is literally what the lipsync + TTS pipeline does.
 
-**Stack:** Qwen 3.5 (LLM) + Kokoro (TTS) + Faster Whisper (STT) + LiveKit
+**Stack:** Qwen 3.6-27B on MLX (LLM) + Kokoro / Orpheus (TTS) + Faster Whisper (STT) + LiveKit
 
 ## Project Structure
 
 ```
-BRO/
+Avatar/
 ├── src/            # Agent & TTS plugins
 ├── ui/             # Web frontend + token server
 ├── config/         # LiveKit server config
