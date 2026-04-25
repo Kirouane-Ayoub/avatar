@@ -132,6 +132,7 @@ node_modules/
 ui/dist/
 *.tsbuildinfo
 
-# Local model weights (downloaded by `docker compose --profile orpheus up`)
+# Safety net for any local model weights — mlx-audio caches under
+# ~/.cache/huggingface/, so this should normally be empty.
 models/
 *.gguf
