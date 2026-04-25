@@ -13,9 +13,6 @@ dependencies = [
     "aiohttp",
 ]
 
-[project.optional-dependencies]
-orpheus = ["snac", "torch"]
-
 [tool.setuptools]
 py-modules = ["agent", "kokoro_tts", "orpheus_tts", "gen_token"]
 package-dir = {"" = "src"}
