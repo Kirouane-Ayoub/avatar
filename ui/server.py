@@ -30,9 +30,8 @@ UI_DIR = Path(__file__).parent
 DIST_DIR = UI_DIR / "dist"
 
 # Paths that must be served from the source tree (ui/) rather than the built
-# React bundle (ui/dist/). Avatar GLBs live in ui/avatar-zoo/; legacy.html is
-# the parked vanilla page.
-_SOURCE_ROUTES = ("/avatar-zoo/", "/legacy.html")
+# React bundle (ui/dist/). Avatar GLBs live in ui/avatar-zoo/.
+_SOURCE_ROUTES = ("/avatar-zoo/",)
 
 ALLOWED_TOOLS = {"calculate", "set_reminder", "online_search", "internal_search"}
 ALLOWED_MOODS = frozenset(MOODS)
@@ -289,8 +288,8 @@ class Handler(SimpleHTTPRequestHandler):
             self._handle_voice_sample(parse_qs(parsed.query))
             return
 
-        # Assets that live outside the React bundle (avatar GLBs, legacy page)
-        # are served from the source tree regardless of whether dist/ exists.
+        # Assets that live outside the React bundle (e.g. avatar GLBs) are
+        # served from the source tree regardless of whether dist/ exists.
         if any(parsed.path.startswith(p) for p in _SOURCE_ROUTES):
             original = self.directory
             self.directory = str(UI_DIR)
