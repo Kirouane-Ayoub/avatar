@@ -8,7 +8,7 @@ services:
       - "7882:7882/udp"
     command: --dev --bind 0.0.0.0 --node-ip 0.0.0.0
     networks:
-      - bro-network
+      - avatar-network
 
   kokoro-tts:
     image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
@@ -33,7 +33,7 @@ services:
       # Reduce logging overhead
       - API_LOG_LEVEL=WARNING
     networks:
-      - bro-network
+      - avatar-network
 
   speaches:
     image: ghcr.io/speaches-ai/speaches:latest-cpu
@@ -50,7 +50,7 @@ services:
       retries: 10
       start_period: 15s
     networks:
-      - bro-network
+      - avatar-network
 
   speaches-model-loader:
     image: curlimages/curl:latest
@@ -63,11 +63,11 @@ services:
              curl -X POST "http://speaches:8000/v1/models/Systran/faster-whisper-tiny" &&
              echo "Model downloaded successfully."'
     networks:
-      - bro-network
+      - avatar-network
 
   agent:
     build: .
-    container_name: bro-agent
+    container_name: avatar-agent
     env_file: .env
     depends_on:
       livekit-server:
@@ -79,7 +79,7 @@ services:
     ports:
       - "3000:3000"
     networks:
-      - bro-network
+      - avatar-network
 
   # Orpheus TTS used to live here as three Docker services
   # (orpheus-tts, orpheus-llama-cpp, orpheus-model-init). It now runs
@@ -88,6 +88,6 @@ services:
   # The agent reaches it at http://host.docker.internal:5005.
 
 networks:
-  bro-network:
-    name: bro-network
+  avatar-network:
+    name: avatar-network
     driver: bridge
