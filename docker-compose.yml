@@ -81,6 +81,13 @@ services:
     networks:
       - bro-network
 
+  # Orpheus TTS used to live here as three Docker services
+  # (orpheus-tts, orpheus-llama-cpp, orpheus-model-init). It now runs
+  # natively on the host via mlx-audio so it can use Metal end-to-end.
+  # Bring it up with: ORPHEUS=1 ./run.sh start
+  # The agent reaches it at http://host.docker.internal:5005.
+
 networks:
   bro-network:
+    name: bro-network
     driver: bridge
