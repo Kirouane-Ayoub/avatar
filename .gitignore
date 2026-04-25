@@ -131,3 +131,7 @@ dmypy.json
 node_modules/
 ui/dist/
 *.tsbuildinfo
+
+# Local model weights (downloaded by `docker compose --profile orpheus up`)
+models/
+*.gguf
