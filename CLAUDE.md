@@ -10,7 +10,7 @@ BRO is a real-time speech-to-speech voice agent named **Lisa**, built with LiveK
 
 ```bash
 # Full stack via Docker Compose
-docker compose up --build
+docker-compose up --build
 # UI at http://localhost:3000
 
 # Management script
@@ -18,7 +18,7 @@ docker compose up --build
 
 # If using local MLX LLM (Mac Metal GPU)
 ./start-llm.sh                    # Terminal 1 (port 8090)
-docker compose up                 # Terminal 2
+docker-compose up                 # Terminal 2
 
 # UI dev server (Vite, with proxy to server.py on :3000)
 cd ui && npm run dev              # :5173, hot reload
@@ -37,7 +37,7 @@ python benchmark.py --rounds 5
 
 **TTS** (`src/kokoro_tts.py`): Custom LiveKit TTS plugin. Uses Kokoro's `/dev/captioned_speech` endpoint which returns audio (base64 PCM) + **word-level** timestamps. Phoneme-level timing exists in Kokoro internals but the FastAPI wrapper collapses it before serializing — see `Lipsync` section below for how the UI compensates client-side. The regular `/v1/audio/speech` endpoint does NOT provide timestamps.
 
-**Orpheus TTS** (`src/orpheus_tts.py`): Alternative TTS using llama.cpp + SNAC codec. Requires `snac` + `torch` (optional deps via `pip install -e ".[orpheus]"`). Not used by default.
+**Orpheus TTS** (`src/orpheus_tts.py`): Alternative TTS via host-side [`mlx-audio`](https://github.com/Blaizzy/mlx-audio) — runs the Orpheus 3B model on Metal end-to-end (autoregressive token generation **and** SNAC decode). The agent (in Docker) talks to the native daemon at `http://host.docker.internal:5005/v1/audio/speech` with `stream: true, response_format: "pcm"` so int16 LE bytes arrive without a RIFF header to skip. The client coalesces TCP arrivals into 4800-byte (100 ms) frames and pushes them through LiveKit's segment-based emitter. No word timestamps (lipsync falls back to jaw-only via `useLipsyncDriver.ts`). Activated per-session by selecting an Orpheus voice; backend routing via `voices.py:backend_for(voice)`. The English fine-tune (`mlx-community/orpheus-3b-0.1-ft-6bit`) covers the canonical eight voices (`tara, leah, jess, leo, dan, mia, zac, zoe`); multilingual voices in the catalog require swapping `ORPHEUS_MODEL` to a language-specific repo (per-voice model mapping not yet wired). Bring up with `ORPHEUS=1 ./run.sh start`. Was previously a triple of Docker services (`orpheus-tts` wrapper + `orpheus-llama-cpp` + `orpheus-model-init`); moved native because Docker on macOS has no Metal.
 
 **Voices** (`src/voices.py`): Kokoro voice catalog. `stt_language_for(voice_id)` derives the language code from the voice prefix (`a/b → en`, `f → fr`, `j → ja`, etc.). Mirrored client-side as `ui/src/data/voice_lang.ts:languageFromVoice()`.
 
@@ -102,6 +102,8 @@ Voice fully drives language. `requestToken` (UI) sends `language: languageFromVo
 All on `bro-network` bridge. Agent reaches services by container name: `livekit-server:7880`, `kokoro-tts:8880`, `speaches:8000`. Browser connects to LiveKit via `LIVEKIT_EXTERNAL_URL` (localhost). LLM is external (not in compose).
 
 Kokoro has ONNX CPU optimizations tuned for M4 Pro (4 threads, parallel execution, reduced chunk size for lower TTFB).
+
+**Orpheus is no longer in compose** — it runs natively via `mlx-audio` (see Orpheus TTS section above). Bring it up alongside the rest with `ORPHEUS=1 ./run.sh start`; Docker stays Kokoro-only.
 
 ## Environment
 
