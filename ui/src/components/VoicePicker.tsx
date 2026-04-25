@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { VoiceInfo } from '../types';
+import type { VoiceBackend, VoiceInfo } from '../types';
 import { fetchVoices, voiceSampleUrl } from '../api';
 import { sampleTextFor } from '../data/voice_samples';
+
+type BackendFilter = 'all' | VoiceBackend;
 
 interface Props {
   value: string;
@@ -75,6 +77,7 @@ export function VoicePicker({ value, onChange, name }: Props) {
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [langFilter, setLangFilter] = useState<string>('all');
+  const [backendFilter, setBackendFilter] = useState<BackendFilter>('all');
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const objectUrlRef = useRef<string | null>(null);
@@ -96,18 +99,45 @@ export function VoicePicker({ value, onChange, name }: Props) {
 
   useEffect(() => cleanup, []);
 
+  // Backend chips show only when the catalog actually contains both — no point
+  // rendering a "Kokoro / Orpheus" toggle when only one is available.
+  const backendCounts = useMemo(() => {
+    const counts: Record<VoiceBackend, number> = { kokoro: 0, orpheus: 0 };
+    for (const v of voices) {
+      const b = v.backend ?? 'kokoro';
+      counts[b] += 1;
+    }
+    return counts;
+  }, [voices]);
+  const showBackendChips = backendCounts.kokoro > 0 && backendCounts.orpheus > 0;
+
+  // Language counts are scoped to the active backend filter so the chip
+  // counts reflect what the user will actually see in the list below.
   const languages = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const v of voices) counts.set(v.language, (counts.get(v.language) ?? 0) + 1);
+    for (const v of voices) {
+      if (backendFilter !== 'all' && (v.backend ?? 'kokoro') !== backendFilter) continue;
+      counts.set(v.language, (counts.get(v.language) ?? 0) + 1);
+    }
     return [...counts.entries()]
       .map(([lang, count]) => ({ lang, count }))
       .sort((a, b) => a.lang.localeCompare(b.lang));
-  }, [voices]);
+  }, [voices, backendFilter]);
+
+  // Reset the language chip if it's no longer offered under the active
+  // backend filter, otherwise the list would silently go empty.
+  useEffect(() => {
+    if (langFilter === 'all') return;
+    if (!languages.some((l) => l.lang === langFilter)) {
+      setLangFilter('all');
+    }
+  }, [languages, langFilter]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     const list = voices
       .map(parseVoice)
+      .filter((v) => backendFilter === 'all' || (v.backend ?? 'kokoro') === backendFilter)
       .filter((v) => langFilter === 'all' || v.language === langFilter)
       .filter((v) => {
         if (!q) return true;
@@ -122,7 +152,7 @@ export function VoicePicker({ value, onChange, name }: Props) {
       return gradeRank(a.grade) - gradeRank(b.grade);
     });
     return list;
-  }, [voices, query, langFilter]);
+  }, [voices, query, langFilter, backendFilter]);
 
   const play = async (voice: ReturnType<typeof parseVoice>) => {
     const toggleOff = playingId === voice.id || loadingId === voice.id;
@@ -179,6 +209,31 @@ export function VoicePicker({ value, onChange, name }: Props) {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
+        {showBackendChips && (
+          <div className="voice-lang-chips voice-backend-chips">
+            <button
+              type="button"
+              className={`lang-chip${backendFilter === 'all' ? ' active' : ''}`}
+              onClick={() => setBackendFilter('all')}
+            >
+              All TTS <span className="lang-count">{voices.length}</span>
+            </button>
+            <button
+              type="button"
+              className={`lang-chip${backendFilter === 'kokoro' ? ' active' : ''}`}
+              onClick={() => setBackendFilter('kokoro')}
+            >
+              Kokoro <span className="lang-count">{backendCounts.kokoro}</span>
+            </button>
+            <button
+              type="button"
+              className={`lang-chip${backendFilter === 'orpheus' ? ' active' : ''}`}
+              onClick={() => setBackendFilter('orpheus')}
+            >
+              Orpheus <span className="lang-count">{backendCounts.orpheus}</span>
+            </button>
+          </div>
+        )}
         {languages.length > 1 && (
           <div className="voice-lang-chips">
             <button
@@ -186,7 +241,9 @@ export function VoicePicker({ value, onChange, name }: Props) {
               className={`lang-chip${langFilter === 'all' ? ' active' : ''}`}
               onClick={() => setLangFilter('all')}
             >
-              All <span className="lang-count">{voices.length}</span>
+              All <span className="lang-count">
+                {languages.reduce((s, l) => s + l.count, 0)}
+              </span>
             </button>
             {languages.map(({ lang, count }) => (
               <button
