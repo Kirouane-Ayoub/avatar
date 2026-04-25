@@ -9,3 +9,15 @@ docker-compose.yml
 README.md
 __pycache__
 *.pyc
+
+# Heavy dirs that should never enter any image's build context.
+# `models/` holds GGUF weights (1.5+ GB) downloaded by orpheus-model-init —
+# they're mounted into the llama.cpp container at runtime, not baked.
+models/
+*.gguf
+ui/node_modules/
+ui/dist/        # rebuilt inside the Dockerfile's ui-builder stage
+.venv/
+.cache/
+.llm.pid
+.tmp/
