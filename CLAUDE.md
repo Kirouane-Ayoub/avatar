@@ -60,7 +60,7 @@ uv tool install --with 'uvicorn[standard]' --with fastapi \
 
 **UI** (`ui/`): React + TypeScript + Vite app. Entry is `ui/index.html` (importmap shell that loads TalkingHead + per-language `lipsync-*` modules from CDN), real app is in `ui/src/`. Two top-level views in `App.tsx`:
 - **Setup wizard** (`SetupWizard.tsx`) — avatar rail, mood, persona, voice picker, abilities chips, device overlay (mic + camera dropdowns + tiny circular cam preview) on the stage-preview.
-- **Session view** (`SessionView.tsx`) — full-bleed avatar stage with status badge + metrics pill + camera self-view bubble; right side panel with chat transcript and call controls (Whisper / Mic / Cam / Leave). Replaces the deprecated `legacy.html` reference monolith.
+- **Session view** (`SessionView.tsx`) — full-bleed avatar stage with status badge + metrics pill + camera self-view bubble; right side panel with chat transcript and call controls (Whisper / Mic / Cam / Leave).
 
 **Token server** (`ui/server.py`): Serves the React `dist/` (or source tree paths like `/avatar-zoo/`) + `/api/token` endpoint + `/api/voices` (Kokoro voices intersected with the running Kokoro server, plus Orpheus voices unconditionally — each tagged with `backend: "kokoro" | "orpheus"`) + `/api/voice-sample` (proxy with concurrency cap that backend-routes to the right TTS server). Generates unique room names per session (`lisa-{uuid}`) so disconnect/reconnect always gets a fresh agent.
 
