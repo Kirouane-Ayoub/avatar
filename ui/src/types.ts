@@ -23,11 +23,15 @@ export interface ToolDef {
   description: string;
 }
 
+export type VoiceBackend = 'kokoro' | 'orpheus';
+
 export interface VoiceInfo {
   id: string;
   language: string;
   gender: Body;
   grade: string;
+  backend?: VoiceBackend;
+  description?: string;
 }
 
 export interface SessionSetup {
