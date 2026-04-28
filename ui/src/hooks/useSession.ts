@@ -54,6 +54,7 @@ export interface SessionState {
   setCameraOn: (on: boolean) => Promise<void>;
   whisperMode: boolean;
   setWhisperMode: (on: boolean) => void;
+  sendText: (text: string) => void;
   disconnect: () => void;
 }
 
@@ -95,6 +96,24 @@ export function useSession(
     if (!room) return;
     roomRef.current = null;
     try { room.disconnect(); } catch { /* ignore */ }
+  };
+
+  const sendText = (text: string) => {
+    const room = roomRef.current;
+    if (!room) return;
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    const payload = new TextEncoder().encode(JSON.stringify({ text: trimmed }));
+    room.localParticipant.publishData(payload, {
+      topic: 'user_text',
+      reliable: true,
+    });
+    // Optimistic local user bubble — the agent doesn't echo typed input
+    // back as a transcript, so we add it ourselves.
+    setTranscripts((prev) => [
+      ...prev,
+      { id: `text-${Date.now()}`, role: 'user', text: trimmed, final: true },
+    ]);
   };
 
   const setMicMuted = (muted: boolean) => {
@@ -347,6 +366,7 @@ export function useSession(
     setCameraOn,
     whisperMode,
     setWhisperMode,
+    sendText,
     disconnect,
   };
 }
