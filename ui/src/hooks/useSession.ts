@@ -58,6 +58,9 @@ export interface SessionState {
 }
 
 const CUE_TAG_RE = /\[\s*(mood|gesture|pose)\s*:\s*[a-zA-Z_]+\s*\]\s*/gi;
+// Orpheus inline vocal emotion tags — rendered as sounds by the TTS, must not
+// appear literally in the transcript. Mirrors ORPHEUS_EMOTION_TAGS in agent.py.
+const ORPHEUS_EMOTE_RE = /<\s*(laugh|sigh|chuckle|cough|sniffle|groan|yawn|gasp)\s*>\s*/gi;
 
 // Whisper mode multiplies mic gain ~2.5× (≈+8 dB) on top of the browser's
 // AGC and disables noiseSuppression (which otherwise filters whispers as
@@ -229,7 +232,9 @@ export function useSession(
         const next = [...prev];
         for (const seg of segments) {
           if (!seg.text) continue;
-          const cleanText = isAgent ? seg.text.replace(CUE_TAG_RE, '') : seg.text;
+          const cleanText = isAgent
+            ? seg.text.replace(CUE_TAG_RE, '').replace(ORPHEUS_EMOTE_RE, '')
+            : seg.text;
           if (isAgent) handlersRef.current.onAgentText?.(cleanText, seg.final);
           const idx = next.findIndex((t) => t.id === seg.id);
           if (idx === -1) {
