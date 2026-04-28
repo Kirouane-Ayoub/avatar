@@ -17,6 +17,7 @@ export function useTalkingHead(
   container: HTMLElement | null,
   avatar: AvatarMeta | null,
   mood: string,
+  view: 'head' | 'upper' | 'full' = 'full',
 ) {
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -24,6 +25,7 @@ export function useTalkingHead(
   const instanceRef = useRef<TalkingHeadInstance | null>(null);
 
   const initialMoodRef = useRef(mood);
+  const initialViewRef = useRef(view);
 
   useEffect(() => {
     if (!container || !avatar) return;
@@ -63,7 +65,7 @@ export function useTalkingHead(
         if (cancelled) return;
         setProgress(null);
         try { instance.setMood(initialMoodRef.current); } catch { /* mood not loaded yet */ }
-        try { instance.setView('full'); } catch { /* optional */ }
+        try { instance.setView(initialViewRef.current); } catch { /* optional */ }
         setHead(instance);
       } catch (e) {
         if (!cancelled) {
@@ -89,6 +91,11 @@ export function useTalkingHead(
     if (!head) return;
     try { head.setMood(mood); } catch { /* ignore */ }
   }, [head, mood]);
+
+  useEffect(() => {
+    if (!head) return;
+    try { head.setView(view); } catch { /* ignore */ }
+  }, [head, view]);
 
   return { progress, error, head };
 }
