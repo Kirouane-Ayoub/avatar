@@ -757,6 +757,37 @@ code {
 .sd-item select:disabled { opacity: 0.4; cursor: not-allowed; }
 .sd-item select option { background: #18181b; color: #e4e4e7; }
 
+.view-toggle {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  /* Solid bg — see .sd-item note re: backdrop-filter over WebGL. */
+  background: rgba(15, 15, 18, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 999px;
+  z-index: 3;
+}
+.view-toggle-btn {
+  background: transparent;
+  border: none;
+  color: #a1a1aa;
+  font: inherit;
+  font-size: 0.62rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 4px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.view-toggle-btn:hover { color: #e4e4e7; }
+.view-toggle-btn.on {
+  background: rgba(99, 102, 241, 0.2);
+  color: #c7d2fe;
+}
+
 .sd-pill {
   background: #27272a;
   border: 1px solid #3f3f46;
