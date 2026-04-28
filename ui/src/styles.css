@@ -38,7 +38,60 @@ code {
   grid-template-columns: 280px 1fr;
   height: 100vh;
   background: #09090b;
+  transition: grid-template-columns 0.18s ease;
 }
+.builder.rail-collapsed { grid-template-columns: 32px 1fr; }
+.builder.form-collapsed .stage { grid-template-columns: 1fr 32px; }
+
+.rail-wrap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.rail-wrap > .avatar-rail { flex: 1; min-height: 0; }
+
+.panel-stub {
+  background: #0c0c10;
+  border: none;
+  border-right: 1px solid #1a1a1f;
+  color: #71717a;
+  font-size: 1.05rem;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: inherit;
+}
+.panel-stub.stub-right {
+  border-right: none;
+  border-left: 1px solid #1a1a1f;
+}
+.panel-stub:hover { background: #18181b; color: #e4e4e7; }
+
+.panel-toggle {
+  position: absolute;
+  top: 12px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(15, 15, 18, 0.92);
+  border: 1px solid #27272a;
+  color: #a1a1aa;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 5;
+  padding: 0;
+}
+.panel-toggle:hover { background: #18181b; color: #e4e4e7; }
+.toggle-rail { right: 8px; }
+.toggle-form { left: 8px; }
 
 .avatar-rail {
   background: #0c0c10;
@@ -239,6 +292,7 @@ code {
 
 /* ── Form (right of preview) ── */
 .stage-form {
+  position: relative;
   display: flex;
   flex-direction: column;
   padding: 1.6rem 1.8rem 1rem;
@@ -1122,6 +1176,40 @@ code {
   margin: auto 0;
   padding: 2rem 1rem;
 }
+
+.text-input-row {
+  display: flex;
+  gap: 6px;
+  padding: 8px 10px 10px;
+  border-top: 1px solid #18181b;
+}
+.text-input {
+  flex: 1;
+  background: #0f0f12;
+  border: 1px solid #27272a;
+  color: #e4e4e7;
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 7px 10px;
+  border-radius: 8px;
+  outline: none;
+}
+.text-input:focus { border-color: #4f46e5; }
+.text-input:disabled { opacity: 0.5; cursor: not-allowed; }
+.text-send {
+  background: #312e81;
+  color: #c7d2fe;
+  border: 1px solid #4338ca;
+  font: inherit;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0 12px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.text-send:hover:not(:disabled) { background: #4338ca; }
+.text-send:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .msg {
   display: flex;
