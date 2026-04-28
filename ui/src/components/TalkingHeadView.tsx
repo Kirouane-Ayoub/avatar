@@ -5,11 +5,12 @@ import { useTalkingHead } from '../hooks/useTalkingHead';
 interface Props {
   avatar: AvatarMeta;
   mood: string;
+  view?: 'head' | 'upper' | 'full';
 }
 
-export function TalkingHeadView({ avatar, mood }: Props) {
+export function TalkingHeadView({ avatar, mood, view = 'full' }: Props) {
   const [container, setContainer] = useState<HTMLDivElement | null>(null);
-  const { progress, error } = useTalkingHead(container, avatar, mood);
+  const { progress, error } = useTalkingHead(container, avatar, mood, view);
 
   return (
     <div className="th-wrap">
