@@ -73,11 +73,17 @@ export function SessionView({ setup, avatar, connection, onExit }: Props) {
   const scheduleViewUpdate = useCallback(() => {
     if (!head) return;
     if (viewTimerRef.current) window.clearTimeout(viewTimerRef.current);
+    // Pose tween is 2000 ms (setPoseFromTemplate). If we re-frame at the
+    // 250 ms cue-coalescing mark we frame the still-standing avatar; the
+    // pose then drops it out of view (especially sitting/kneel/oneknee).
+    // Wait past the tween when a pose is in play.
+    const { hasPose } = turnCuesRef.current;
+    const delay = hasPose ? 2200 : 250;
     viewTimerRef.current = window.setTimeout(() => {
       const { hasGesture, hasPose } = turnCuesRef.current;
       const view = hasPose ? 'full' : hasGesture ? 'upper' : 'head';
       try { head.setView(view); } catch { /* ignore */ }
-    }, 250);
+    }, delay);
   }, [head]);
 
   useEffect(() => {
