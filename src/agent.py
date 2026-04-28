@@ -123,7 +123,43 @@ def _orpheus_emotion_block() -> str:
     )
 
 
-def build_system_prompt(name: str, persona: str, backend: str = "kokoro") -> str:
+# Voice TTS engines can only pronounce their own language. If the LLM replies
+# in a different language than the voice, output sounds garbled — so we lock
+# the reply language to whatever language the voice belongs to.
+_LANG_NAMES = {
+    "en": "English",
+    "ja": "Japanese (日本語)",
+    "fr": "French (français)",
+    "de": "German (Deutsch)",
+    "es": "Spanish (español)",
+    "it": "Italian (italiano)",
+    "ko": "Korean (한국어)",
+    "hi": "Hindi (हिन्दी)",
+    "zh": "Mandarin Chinese (中文)",
+    "pt": "Portuguese (português)",
+}
+
+
+def _language_block(language: str) -> str:
+    name = _LANG_NAMES.get(language)
+    if not name:
+        return ""
+    return (
+        "\n\n"
+        f"LANGUAGE LOCK: You speak ONLY in {name}. Reply in {name} no matter "
+        "what language the user speaks — even if they switch mid-conversation, "
+        f"you do NOT switch. The voice you use can only pronounce {name} "
+        "correctly; replying in any other language would sound garbled. "
+        f"If the user speaks another language, gently respond in {name} anyway."
+    )
+
+
+def build_system_prompt(
+    name: str,
+    persona: str,
+    backend: str = "kokoro",
+    language: str = "en",
+) -> str:
     return (
         f"You are {name}.\n\n"
         f"{persona}\n\n"
@@ -166,6 +202,7 @@ def build_system_prompt(name: str, persona: str, backend: str = "kokoro") -> str
         "NEVER skip the cues. NEVER use spaces inside brackets. NEVER write [Mood: happy] "
         "or [mood : happy] — only [mood:happy]."
         + (_orpheus_emotion_block() if backend == "orpheus" else "")
+        + _language_block(language)
     )
 
 
@@ -247,8 +284,13 @@ class VoiceAgent(Agent):
 
     async def on_user_turn_completed(self, turn_ctx, new_message):
         """Inject the latest camera frame into the chat context before LLM processes it."""
+        # Diagnostic: print the exact text about to be sent to the LLM so we
+        # can identify phantom turns (Whisper hallucinations, echo, etc.).
+        raw_text = (new_message.text_content or "").strip()
         logger.info(
-            "on_user_turn_completed called, has image: %s",
+            "USER_TURN -> LLM | text=%r | len=%d | has_image=%s",
+            raw_text,
+            len(raw_text),
             self._last_image_url is not None,
         )
         if self._last_image_url is not None:
@@ -317,7 +359,9 @@ async def entrypoint(ctx):
         _publish({"type": kind, "value": value})
 
     agent = VoiceAgent(
-        instructions=build_system_prompt(name, persona, backend=backend),
+        instructions=build_system_prompt(
+            name, persona, backend=backend, language=language
+        ),
         tools=tools,
         publish_cue=_publish_cue,
     )
@@ -358,8 +402,29 @@ async def entrypoint(ctx):
         )
 
     session = AgentSession(
-        min_endpointing_delay=0.3,
-        vad=silero.VAD.load(),
+        turn_handling={
+            "endpointing": {"min_delay": 0.3},
+            "interruption": {
+                # Echo / room noise typically transcribes to <1 s bursts and
+                # 0–1 words. Require sustained speech AND ≥2 words before the
+                # avatar yields, so a stray "yeah" leaking from the speakers
+                # doesn't cut it off mid-sentence.
+                "min_duration": 1.0,
+                "min_words": 2,
+                # If we DO interrupt and it turns out to be a false alarm
+                # (e.g. user transcript ends up empty), let the avatar resume.
+                "resume_false_interruption": True,
+            },
+        },
+        # Tightened Silero VAD: defaults (activation_threshold=0.5,
+        # min_speech_duration=0.05) trigger on mic-floor noise / brief
+        # bumps, which then get fed to Whisper and fitted to high-prior
+        # phrases. Raising both gates the entry point.
+        vad=silero.VAD.load(
+            activation_threshold=0.65,
+            min_speech_duration=0.25,
+            min_silence_duration=0.7,
+        ),
         stt=openai.STT(
             base_url=STT_URL,
             api_key="none",
@@ -377,6 +442,24 @@ async def entrypoint(ctx):
         ),
         tts=tts_engine,
     )
+
+    # Typed user input — UI publishes JSON {"text": "..."} on topic "user_text".
+    # We inject it into the LLM via session.generate_reply, which runs the full
+    # LLM → TTS pipeline so the avatar still speaks the answer.
+    @ctx.room.on("data_received")
+    def on_data_received(packet):
+        if getattr(packet, "topic", None) != "user_text":
+            return
+        try:
+            payload = json.loads(packet.data.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as e:
+            logger.warning("Bad user_text payload: %s", e)
+            return
+        text = (payload.get("text") or "").strip() if isinstance(payload, dict) else ""
+        if not text:
+            return
+        logger.info("USER_TEXT -> LLM | text=%r", text)
+        asyncio.ensure_future(session.generate_reply(user_input=text))
 
     # Manually subscribe to video tracks (audio is handled by AUDIO_ONLY)
     @ctx.room.on("track_published")
