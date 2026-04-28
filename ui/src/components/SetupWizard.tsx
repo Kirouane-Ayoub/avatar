@@ -28,6 +28,19 @@ export function SetupWizard({ setup, onChange, onStart, starting, error }: Props
   const [micId, setMicId] = useState<string>('');
   const [camId, setCamId] = useState<string>('');
   const [view, setView] = useState<PreviewView>('full');
+  const [railCollapsed, setRailCollapsed] = useState(
+    () => localStorage.getItem('avatar.railCollapsed') === '1',
+  );
+  const [formCollapsed, setFormCollapsed] = useState(
+    () => localStorage.getItem('avatar.formCollapsed') === '1',
+  );
+
+  useEffect(() => {
+    localStorage.setItem('avatar.railCollapsed', railCollapsed ? '1' : '0');
+  }, [railCollapsed]);
+  useEffect(() => {
+    localStorage.setItem('avatar.formCollapsed', formCollapsed ? '1' : '0');
+  }, [formCollapsed]);
 
   const currentAvatar = AVATARS[setup.avatar] ?? AVATARS.brunette;
 
@@ -62,11 +75,38 @@ export function SetupWizard({ setup, onChange, onStart, starting, error }: Props
   const canStart = !!setup.name.trim() && !starting;
 
   return (
-    <div className="builder">
-      <AvatarPicker
-        selected={setup.avatar}
-        onSelect={(key) => onChange({ avatar: key })}
-      />
+    <div
+      className={`builder${railCollapsed ? ' rail-collapsed' : ''}${
+        formCollapsed ? ' form-collapsed' : ''
+      }`}
+    >
+      {railCollapsed ? (
+        <button
+          type="button"
+          className="panel-stub stub-left"
+          onClick={() => setRailCollapsed(false)}
+          title="Show avatars"
+          aria-label="Show avatars panel"
+        >
+          ›
+        </button>
+      ) : (
+        <div className="rail-wrap">
+          <AvatarPicker
+            selected={setup.avatar}
+            onSelect={(key) => onChange({ avatar: key })}
+          />
+          <button
+            type="button"
+            className="panel-toggle toggle-rail"
+            onClick={() => setRailCollapsed(true)}
+            title="Hide avatars"
+            aria-label="Hide avatars panel"
+          >
+            ‹
+          </button>
+        </div>
+      )}
 
       <div className="stage">
         <div className="stage-preview">
@@ -101,7 +141,27 @@ export function SetupWizard({ setup, onChange, onStart, starting, error }: Props
           </div>
         </div>
 
+        {formCollapsed ? (
+          <button
+            type="button"
+            className="panel-stub stub-right"
+            onClick={() => setFormCollapsed(false)}
+            title="Show build panel"
+            aria-label="Show build panel"
+          >
+            ‹
+          </button>
+        ) : (
         <div className="stage-form">
+          <button
+            type="button"
+            className="panel-toggle toggle-form"
+            onClick={() => setFormCollapsed(true)}
+            title="Hide build panel"
+            aria-label="Hide build panel"
+          >
+            ›
+          </button>
           <div className="form-header">
             <h2>Build your companion</h2>
             <p>Pick an avatar, give them a voice, a persona, and abilities.</p>
@@ -186,6 +246,7 @@ export function SetupWizard({ setup, onChange, onStart, starting, error }: Props
             </button>
           </div>
         </div>
+        )}
       </div>
     </div>
   );
