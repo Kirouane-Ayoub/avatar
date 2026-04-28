@@ -235,6 +235,11 @@ export function useSession(
           const cleanText = isAgent
             ? seg.text.replace(CUE_TAG_RE, '').replace(ORPHEUS_EMOTE_RE, '')
             : seg.text;
+          // Skip agent segments that are pure cue/emote tags (e.g. just
+          // "[mood:happy][gesture:handup] <laugh>") — they'd render as an
+          // empty bubble. Audio + gestures still play; only the transcript
+          // entry is suppressed.
+          if (isAgent && !cleanText.trim()) continue;
           if (isAgent) handlersRef.current.onAgentText?.(cleanText, seg.final);
           const idx = next.findIndex((t) => t.id === seg.id);
           if (idx === -1) {
