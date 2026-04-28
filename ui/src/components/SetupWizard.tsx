@@ -17,9 +17,17 @@ interface Props {
   error: string | null;
 }
 
+type PreviewView = 'head' | 'upper' | 'full';
+const VIEW_OPTIONS: { id: PreviewView; label: string }[] = [
+  { id: 'head', label: 'Head' },
+  { id: 'upper', label: 'Upper' },
+  { id: 'full', label: 'Full' },
+];
+
 export function SetupWizard({ setup, onChange, onStart, starting, error }: Props) {
   const [micId, setMicId] = useState<string>('');
   const [camId, setCamId] = useState<string>('');
+  const [view, setView] = useState<PreviewView>('full');
 
   const currentAvatar = AVATARS[setup.avatar] ?? AVATARS.brunette;
 
@@ -62,7 +70,20 @@ export function SetupWizard({ setup, onChange, onStart, starting, error }: Props
 
       <div className="stage">
         <div className="stage-preview">
-          <TalkingHeadView avatar={currentAvatar} mood={setup.mood} />
+          <TalkingHeadView avatar={currentAvatar} mood={setup.mood} view={view} />
+          <div className="view-toggle" role="group" aria-label="Preview framing">
+            {VIEW_OPTIONS.map((v) => (
+              <button
+                key={v.id}
+                type="button"
+                className={`view-toggle-btn${view === v.id ? ' on' : ''}`}
+                aria-pressed={view === v.id}
+                onClick={() => setView(v.id)}
+              >
+                {v.label}
+              </button>
+            ))}
+          </div>
           <DevicePanel
             cameraOn={setup.camera}
             onCameraChange={(on) => onChange({ camera: on })}
