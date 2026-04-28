@@ -178,6 +178,14 @@ export function SessionView({ setup, avatar, connection, onExit }: Props) {
     }
   }, [session.cameraPreview]);
 
+  const [textInput, setTextInput] = useState('');
+  const handleSendText = () => {
+    const v = textInput.trim();
+    if (!v || session.status !== 'connected') return;
+    session.sendText(v);
+    setTextInput('');
+  };
+
   // Auto-scroll transcript to latest.
   const transcriptRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -297,6 +305,32 @@ export function SessionView({ setup, avatar, connection, onExit }: Props) {
             </div>
           ))}
         </div>
+
+        <form
+          className="text-input-row"
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleSendText();
+          }}
+        >
+          <input
+            type="text"
+            className="text-input"
+            placeholder="Type a message…"
+            value={textInput}
+            onChange={(e) => setTextInput(e.target.value)}
+            disabled={session.status !== 'connected'}
+            maxLength={500}
+          />
+          <button
+            type="submit"
+            className="text-send"
+            disabled={!textInput.trim() || session.status !== 'connected'}
+            aria-label="Send"
+          >
+            Send
+          </button>
+        </form>
       </aside>
     </div>
   );
