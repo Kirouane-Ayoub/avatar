@@ -1,8 +1,8 @@
 """Persistent per-user memory for the voice agent.
 
 Why this exists: between sessions the agent currently forgets everything.
-This module gives Lisa a long-term memory keyed by user identity, so she
-can remember names, prior conversations, preferences, ongoing topics.
+This module gives the avatar a long-term memory keyed by avatar identity,
+so it can remember names, prior conversations, preferences, ongoing topics.
 
 Architecture:
   - Single seam (`MemoryProvider` Protocol) so the backend is swappable
@@ -41,21 +41,29 @@ logger = logging.getLogger("memory")
 
 
 class MemoryProvider(Protocol):
-    """The seam. Three methods is enough for a friend-bot.
+    """The seam. Methods:
 
-    `record_turn` is fire-and-forget; the implementation runs fact
-    extraction asynchronously and returns immediately so the voice loop
-    isn't blocked.
+    - `record_batch` is the primary write path. agent.py buffers user
+      messages and flushes a batch every N turns (and at session end);
+      the provider then runs ONE LLM-driven extraction over the whole
+      batch instead of N. Cuts extraction-LLM load by ~10x and lets
+      the LLM reason over multiple turns at once for better facts.
 
-    `recall` returns a SHORT prose summary of relevant prior context to
-    inject into the system prompt. Returns "" when nothing is recalled
-    (or anything goes wrong) so the caller can string-concat blindly.
+    - `record_turn` is the legacy single-turn variant — kept for tests
+      / one-off use. Default impl just wraps record_batch with a
+      one-element list.
 
-    `forget` removes EVERY memory belonging to that owner_id. Used by
-    delete-account (with avatar_id) and delete-avatar. Best-effort like
-    the others — failure is logged but never raises into the caller.
-    The id is opaque to memory.py — Mem0 just sees it as a string handle.
+    - `recall` returns a SHORT prose summary of relevant prior context
+      to inject into the system prompt. Returns "" when nothing is
+      recalled (or anything goes wrong).
+
+    - `forget` removes EVERY memory belonging to that owner_id. Used
+      by delete-avatar (and cascade through delete-account).
     """
+
+    async def record_batch(
+        self, user_id: str, messages: list[dict]
+    ) -> None: ...
 
     async def record_turn(self, user_id: str, role: str, text: str) -> None: ...
 
@@ -70,6 +78,9 @@ class NullProvider:
     Lets agent.py treat memory as always-present without an `if` guard
     on every call site.
     """
+
+    async def record_batch(self, user_id: str, messages: list[dict]) -> None:
+        return
 
     async def record_turn(self, user_id: str, role: str, text: str) -> None:
         return
@@ -163,9 +174,9 @@ class Mem0Provider:
                     "user": pg_user,
                     "password": pg_password,
                     "dbname": pg_dbname,
-                    # Default Mem0 collection name; explicit so future
-                    # multi-tenant deployments can namespace this.
-                    "collection_name": "lisa_memories",
+                    # Mem0 collection name; explicit so future multi-tenant
+                    # deployments can namespace this.
+                    "collection_name": "memories",
                 },
             },
         }
@@ -181,28 +192,42 @@ class Mem0Provider:
             f" @ {embedder_base_url}" if embedder_base_url else "",
         )
 
-    async def record_turn(self, user_id: str, role: str, text: str) -> None:
-        if not text or not text.strip():
+    async def record_batch(self, user_id: str, messages: list[dict]) -> None:
+        """Send a batch of conversation messages to Mem0 for ONE
+        extraction pass. agent.py buffers user turns and calls this
+        every N turns (and at session end) — far cheaper than calling
+        the extraction LLM per turn, and the LLM gets to reason over
+        multiple turns at once for better facts.
+
+        `messages` is a list of `{"role": "user"|"assistant", "content": "..."}`
+        in chronological order.
+        """
+        # Filter empties + cap content to keep the extraction prompt
+        # sane. A pathological 50 KB message could blow the context.
+        cleaned = [
+            {"role": m["role"], "content": m["content"][:2000].strip()}
+            for m in messages
+            if m.get("content") and m["content"].strip()
+        ]
+        if not cleaned:
             return
-        # mem0.add expects the chat-message shape so it can extract facts
-        # from natural conversation. Run off-thread so the voice loop
-        # doesn't stall on the synchronous SDK call.
-        snippet = text[:80] + ("..." if len(text) > 80 else "")
-        logger.info("memory.write: user=%s role=%s text=%r", user_id, role, snippet)
+
+        logger.info(
+            "memory.batch: user=%s messages=%d (first=%r)",
+            user_id, len(cleaned), cleaned[0]["content"][:80],
+        )
         try:
             result = await asyncio.to_thread(
                 self._memory.add,
-                messages=[{"role": role, "content": text}],
+                messages=cleaned,
                 user_id=user_id,
             )
         except Exception:
-            logger.exception("memory.write FAILED user=%s", user_id)
+            logger.exception("memory.batch FAILED user=%s", user_id)
             return
 
-        # mem0.add returns a dict like {"results": [{"memory": "...", "event": "ADD"|"UPDATE"|"NONE"}, ...]}
-        # — surface what was actually extracted so you can see Mem0's
-        # judgment in real time. "NONE" means Mem0 decided no new fact
-        # was worth recording from this turn (very common for filler).
+        # Same response-shape handling as before — log per-fact so you
+        # see what Mem0 actually extracted from the batch.
         try:
             items = (
                 result.get("results", [])
@@ -210,18 +235,24 @@ class Mem0Provider:
                 else (result or [])
             )
             if not items:
-                logger.info("memory.write -> no facts extracted user=%s", user_id)
+                logger.info("memory.batch -> no facts extracted user=%s", user_id)
             else:
                 for it in items:
                     event = it.get("event", "?")
                     mem = (it.get("memory") or "").strip()
                     logger.info(
-                        "memory.write -> %s: %r user=%s", event, mem[:120], user_id
+                        "memory.batch -> %s: %r user=%s", event, mem[:120], user_id
                     )
         except Exception:
-            # Diagnostic logging must never break the call site — if the
-            # response shape changes upstream, just log raw and move on.
-            logger.info("memory.write -> raw=%s user=%s", str(result)[:200], user_id)
+            logger.info("memory.batch -> raw=%s user=%s", str(result)[:200], user_id)
+
+    async def record_turn(self, user_id: str, role: str, text: str) -> None:
+        """Legacy single-turn write — wraps record_batch with a one-element
+        list. Kept so any call site that still uses it (tests, etc.)
+        doesn't break."""
+        if not text or not text.strip():
+            return
+        await self.record_batch(user_id, [{"role": role, "content": text}])
 
     async def recall(self, user_id: str, query: str = "") -> str:
         # Empty query = "give me whatever's relevant to this user"; we
@@ -229,23 +260,25 @@ class Mem0Provider:
         # for session-start recall we just ask for everything pinned.
         mode = "get_all" if not query else "search"
         logger.info("memory.read: user=%s mode=%s query=%r", user_id, mode, query[:80])
+        # Mem0 API gotcha: top-level entity kwargs (`user_id=`, `agent_id=`,
+        # `run_id=`) were rejected starting with the version we're on now —
+        # they raise `ValueError: Top-level entity parameters frozenset(...)
+        # are not supported in get_all(). Use filters={'user_id': '...'}
+        # instead.` Both `get_all` and `search` need the new shape.
+        filters = {"user_id": user_id}
         try:
-            # `get_all` returns ALL memories for the user; for short
-            # sessions and small per-user memory this is fine. If we
-            # later have users with hundreds of facts, swap to
-            # `search(query=..., limit=N)` keyed off the latest turn.
             if not query:
                 results = await asyncio.to_thread(
                     self._memory.get_all,
-                    user_id=user_id,
-                    limit=20,
+                    filters=filters,
+                    top_k=20,  # was `limit=` — also renamed in this Mem0 version
                 )
             else:
                 results = await asyncio.to_thread(
                     self._memory.search,
                     query=query,
-                    user_id=user_id,
-                    limit=10,
+                    filters=filters,
+                    top_k=10,
                 )
         except Exception:
             logger.exception("memory.read FAILED user=%s mode=%s", user_id, mode)
