@@ -23,22 +23,29 @@ dependencies = [
     # Both required; without [pool] Mem0 silently falls back to NullProvider
     # at startup with an ImportError logged.
     "psycopg[binary,pool]",
+    # Auth: bcrypt for password hashing, pyjwt for session tokens.
+    "bcrypt",
+    "pyjwt",
 ]
 
 [tool.setuptools]
+# Top-level modules that live directly under src/ (entrypoint, shared
+# vocabulary, CLI helpers, function tools).
 py-modules = [
     "agent",
     "config",
     "cues",
     "gen_token",
-    "identity",
-    "kokoro_tts",
-    "llm_client",
-    "memory",
-    "orpheus_tts",
-    "system_prompt",
     "tools",
-    "vision_watcher",
-    "voices",
+]
+# Sub-packages under src/. Each has __init__.py re-exporting its public
+# API so importers do `from auth import X` instead of reaching into
+# submodules.
+packages = [
+    "auth",
+    "llm",
+    "memory",
+    "tts",
+    "vision",
 ]
 package-dir = {"" = "src"}
