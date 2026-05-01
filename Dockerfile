@@ -27,7 +27,9 @@ RUN pip install --no-cache-dir \
     "python-dotenv" \
     "numpy" \
     "soundfile" \
-    "aiohttp"
+    "aiohttp" \
+    "mem0ai" \
+    "psycopg[binary,pool]"
 
 # 3. Copy source code (only this rebuilds on code changes — fast)
 COPY src/ src/
