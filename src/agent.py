@@ -14,6 +14,7 @@ from livekit import rtc  # noqa: E402
 from livekit.agents import (  # noqa: E402
     Agent,
     AgentSession,
+    APIConnectOptions,
     AutoSubscribe,
     WorkerOptions,
     cli,
@@ -29,6 +30,7 @@ from cues import GESTURES, MOODS, POSES  # noqa: E402
 from kokoro_tts import KokoroConfig, KokoroTTS  # noqa: E402
 from orpheus_tts import OrpheusConfig, OrpheusTTS  # noqa: E402
 from tools import TOOL_CATALOG  # noqa: E402
+from vision_watcher import VisionWatcher, VisionWatcherConfig  # noqa: E402
 from voices import (  # noqa: E402
     backend_for,
     is_known_voice,
@@ -49,6 +51,12 @@ STT_MODEL = os.getenv("STT_MODEL", "Systran/faster-whisper-base")
 # picks an Orpheus voice; left unset, Orpheus voices simply won't synthesize.
 ORPHEUS_URL = os.getenv("ORPHEUS_BASE_URL")
 ORPHEUS_MODEL = os.getenv("ORPHEUS_MODEL", "orpheus")
+
+# Optional ambient affect channel. When VLM_BASE_URL is set, a background
+# watcher samples camera frames between turns and emits subtle mood cues
+# so the avatar reacts to the user's face without waiting for them to speak.
+VLM_URL = os.getenv("VLM_BASE_URL")
+VLM_MODEL = os.getenv("VLM_MODEL", "mlx-community/Qwen3-VL-2B-Instruct-4bit")
 
 DEFAULT_PERSONA = "You are a warm, friendly companion. Chat like a close friend."
 DEFAULT_NAME = "Assistant"
@@ -210,6 +218,29 @@ CUE_RE = re.compile(r"\[\s*(mood|gesture|pose)\s*:\s*([a-zA-Z_]+)\s*\]", re.IGNO
 ANY_BRACKET_RE = re.compile(r"\[[^\]]{0,40}\]")
 
 
+class PatientLLM(openai.LLM):
+    """openai.LLM with a wider per-call APIConnectOptions.timeout.
+
+    The 27B VL model with a freshly injected camera frame routinely takes
+    5-15 s TTFT on M4 Pro (vision encoding + autoregressive generation).
+    The DEFAULT APIConnectOptions.timeout is 10 s, so without overriding
+    here, livekit-agents fires the per-attempt timeout BEFORE the model
+    starts streaming, then retries — queueing more requests on the serial
+    mlx-vlm server and spiraling. Plain `timeout=` kwarg on openai.LLM
+    only configures the openai-python httpx client (a different layer)
+    and does NOT touch the livekit retry timeout. So we override
+    conn_options on every chat() call.
+    """
+
+    _PATIENT_CONN = APIConnectOptions(
+        max_retry=3, retry_interval=2.0, timeout=60.0
+    )
+
+    def chat(self, *args, **kwargs):
+        kwargs.setdefault("conn_options", self._PATIENT_CONN)
+        return super().chat(*args, **kwargs)
+
+
 class VoiceAgent(Agent):
     def __init__(self, instructions: str, tools: list, publish_cue=None) -> None:
         super().__init__(
@@ -260,6 +291,13 @@ class VoiceAgent(Agent):
 
         async for frame in Agent.default.tts_node(self, filtered(), model_settings):
             yield frame
+
+    def clear_frame(self):
+        """Drop the cached frame. Called when the video track ends so the
+        VisionWatcher (and the chat-time image injector) don't keep acting
+        on a stale snapshot of the user from before they killed the camera.
+        """
+        self._last_image_url = None
 
     def set_frame(self, frame: rtc.VideoFrame):
         """Encode the frame to JPEG immediately so it doesn't go stale."""
@@ -402,6 +440,14 @@ async def entrypoint(ctx):
         )
 
     session = AgentSession(
+        # Disabled: image injection in on_user_turn_completed mutates the
+        # chat context AFTER preemptive generation has already kicked off,
+        # so every preemptive call is invalidated and re-issued — wasted
+        # round-trips that pile up on the slow 27B VL model and push us
+        # past the LLM client timeout. Without preemption, one call per
+        # turn, no warning spam ("preemptive generation enabled but chat
+        # context or tools have changed after on_user_turn_completed").
+        preemptive_generation=False,
         turn_handling={
             "endpointing": {"min_delay": 0.3},
             "interruption": {
@@ -431,7 +477,7 @@ async def entrypoint(ctx):
             model=STT_MODEL,
             language=language,
         ),
-        llm=openai.LLM(
+        llm=PatientLLM(
             base_url=LLM_URL,
             api_key=LLM_API_KEY,
             model=LLM_MODEL,
@@ -483,6 +529,13 @@ async def entrypoint(ctx):
                 agent.set_frame(event.frame)
         except Exception as e:
             logger.warning("Video stream ended: %s", e)
+        finally:
+            # Stream ends when the user mutes / unpublishes the camera,
+            # disconnects, or the track is unsubscribed for any reason.
+            # Drop the cached frame so the watcher and image injector
+            # don't act on a stale snapshot.
+            agent.clear_frame()
+            logger.info("Video stream cleared (camera off / track ended)")
 
     @session.on("conversation_item_added")
     def on_conversation_item(event):
@@ -540,6 +593,59 @@ async def entrypoint(ctx):
             logger.warning("metrics error: %s", e)
 
     await session.start(agent=agent, room=ctx.room)
+
+    # Ambient affect watcher: sample frames between turns and publish mood
+    # cues from a small VLM. Only runs when VLM_BASE_URL is configured;
+    # otherwise the avatar's only mood source remains the chat LLM's reply
+    # cues. Idle-gated via AgentSession state so it never preempts the LLM.
+    watcher: VisionWatcher | None = None
+    if VLM_URL:
+        # Cache last seen state pair so we only log when it changes — without
+        # this we'd spam one log line per 1 s tick when the watcher is gated.
+        _state_cache = {"u": None, "a": None}
+
+        # AgentSession state transitions discovered the hard way:
+        #   user_state:  "listening" | "speaking" | "away"
+        #     ("away" fires after a stretch of mic silence — by far the most
+        #      common state during long ambient observation, NOT a blocker)
+        #   agent_state: "initializing" | "listening" | "thinking" | "speaking"
+        # The watcher should fire whenever the user isn't actively talking
+        # AND the agent isn't generating/speaking. Anything else (away,
+        # initializing, ...) is fine — treat as idle. Earlier the gate was
+        # `both == "listening"` which silently froze the watcher the moment
+        # `user_state` flipped to "away" (within ~30 s of silence).
+        _USER_ACTIVE = {"speaking"}
+        _AGENT_BUSY = {"thinking", "speaking"}
+
+        def _is_idle() -> bool:
+            try:
+                u_str = str(getattr(session, "user_state", "listening"))
+                a_str = str(getattr(session, "agent_state", "listening"))
+                idle = u_str not in _USER_ACTIVE and a_str not in _AGENT_BUSY
+                if (u_str, a_str) != (_state_cache["u"], _state_cache["a"]):
+                    logger.info(
+                        "session state: user=%s agent=%s -> idle=%s",
+                        u_str, a_str, idle,
+                    )
+                    _state_cache["u"] = u_str
+                    _state_cache["a"] = a_str
+                return idle
+            except Exception as e:
+                logger.warning("_is_idle exception: %s", e)
+                return False
+
+        watcher = VisionWatcher(
+            config=VisionWatcherConfig(base_url=VLM_URL, model=VLM_MODEL),
+            get_frame_data_url=lambda: agent._last_image_url,
+            is_idle=_is_idle,
+            publish_cue=_publish_cue,
+        )
+        await watcher.start()
+
+        async def _shutdown_watcher():
+            await watcher.stop()
+
+        ctx.add_shutdown_callback(_shutdown_watcher)
 
     await session.generate_reply(
         user_input="(greet your friend casually in one short line, like you just walked into the room — no 'how can I help')"
