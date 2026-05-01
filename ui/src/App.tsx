@@ -12,7 +12,7 @@ const DEFAULT_PERSONA =
 
 const DEFAULT_SETUP: SessionSetup = {
   avatar: DEFAULT_AVATAR_KEY,
-  name: 'Lisa',
+  name: 'Liva',
   persona: DEFAULT_PERSONA,
   mood: 'happy',
   voice: '',
