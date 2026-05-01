@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+import time
 from typing import AsyncIterable
 
 from dotenv import load_dotenv
@@ -28,6 +29,7 @@ from livekit.agents.utils.images import (  # noqa: E402
 from livekit.plugins import openai, silero  # noqa: E402
 from cues import GESTURES, MOODS, POSES  # noqa: E402
 from kokoro_tts import KokoroConfig, KokoroTTS  # noqa: E402
+from memory import build_provider, memory_block  # noqa: E402
 from orpheus_tts import OrpheusConfig, OrpheusTTS  # noqa: E402
 from tools import TOOL_CATALOG  # noqa: E402
 from vision_watcher import VisionWatcher, VisionWatcherConfig  # noqa: E402
@@ -375,13 +377,28 @@ async def entrypoint(ctx):
 
     backend = backend_for(voice)
 
+    # Per-user persistent memory. Single-user dev today (token server
+    # hardcodes participant.identity = "user"); when real auth lands,
+    # the token server starts issuing per-user identities and this code
+    # picks them up automatically. NullProvider is used when MEM0_PG_HOST
+    # is unset, so memory is fully optional.
+    memory = build_provider()
+    user_id = participant.identity or "anonymous"
+    _recall_t0 = time.monotonic()
+    recalled = await memory.recall(user_id)
+    _recall_ms = round((time.monotonic() - _recall_t0) * 1000)
+    if recalled:
+        logger.info("recalled %d chars for user=%s", len(recalled), user_id)
+
     logger.info(
-        "Session: name=%s language=%s voice=%s backend=%s tools=%s",
+        "Session: name=%s language=%s voice=%s backend=%s tools=%s user_id=%s memory=%s",
         name,
         language,
         voice,
         backend,
         [t.__name__ for t in tools],
+        user_id,
+        type(memory).__name__,
     )
 
     def _publish(data):
@@ -396,9 +413,29 @@ async def entrypoint(ctx):
     def _publish_cue(kind: str, value: str):
         _publish({"type": kind, "value": value})
 
+    # Surface the session-start recall latency to the UI metrics pill so
+    # you can see whether the read path is healthy at a glance, alongside
+    # STT/LLM/TTS/E2E. NullProvider returns "" instantly so this just
+    # logs ~0 ms when memory is disabled — fine.
+    _publish({"type": "memory", "op": "read", "ms": _recall_ms})
+
+    async def _record_turn_metric(uid: str, role: str, text: str) -> None:
+        """Wrap memory.record_turn so we can publish per-write timing
+        to the same UI metrics pill the other latency numbers go to.
+        Memory writes happen async (off the conversation hot path), so
+        this just lights up the pill when the write completes."""
+        t0 = time.monotonic()
+        await memory.record_turn(uid, role, text)
+        _publish({
+            "type": "memory",
+            "op": "write",
+            "ms": round((time.monotonic() - t0) * 1000),
+        })
+
     agent = VoiceAgent(
-        instructions=build_system_prompt(
-            name, persona, backend=backend, language=language
+        instructions=(
+            build_system_prompt(name, persona, backend=backend, language=language)
+            + memory_block(recalled)
         ),
         tools=tools,
         publish_cue=_publish_cue,
@@ -540,6 +577,21 @@ async def entrypoint(ctx):
     @session.on("conversation_item_added")
     def on_conversation_item(event):
         msg = event.item
+
+        # Persist the turn to memory regardless of metrics presence — we
+        # want every real exchange recorded, and Mem0's fact extraction
+        # runs async so this doesn't block the next turn. Stripped of
+        # cue tags so memory doesn't see "[mood:happy] hi". Best-effort:
+        # any failure is logged inside the provider.
+        if msg.role in ("user", "assistant"):
+            text = (msg.text_content or "").strip()
+            if msg.role == "assistant":
+                text = ANY_BRACKET_RE.sub("", text).strip()
+            if text:
+                asyncio.ensure_future(
+                    _record_turn_metric(user_id, msg.role, text)
+                )
+
         if not hasattr(msg, "metrics"):
             return
         m = msg.metrics
