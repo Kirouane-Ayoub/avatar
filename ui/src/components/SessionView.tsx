@@ -34,10 +34,19 @@ const METRIC_THRESHOLDS: Record<MetricKey, [number, number]> = {
   llm: [300, 800],
   tts: [200, 500],
   e2e: [800, 1500],
+  // memR: a healthy session-start recall is sub-200ms (DB hit + a tiny
+  // amount of embedding for search). >500ms means the embedder cold-
+  // started or the DB is slow.
+  memR: [200, 500],
+  // memW: write includes Mem0's async LLM fact extraction (small VLM at
+  // :5006). Several seconds is normal — we're cutting an LLM call to
+  // distill the turn into a fact. >5s likely means the VLM is queued.
+  memW: [2000, 5000],
 };
 
 const METRIC_LABEL: Record<MetricKey, string> = {
   stt: 'STT', llm: 'LLM', tts: 'TTS', e2e: 'E2E',
+  memR: 'MEM R', memW: 'MEM W',
 };
 
 function metricClass(key: MetricKey, val: number) {
