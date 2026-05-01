@@ -27,18 +27,30 @@ fi
 
 MODEL="${1:-${LLM_MODEL:-mlx-community/Qwen3.6-27B-4bit}}"
 PORT="${2:-${LLM_PORT:-8090}}"
+KV_BITS="${LLM_KV_BITS:-3.5}"
+KV_QUANT_SCHEME="${LLM_KV_QUANT_SCHEME:-turboquant}"
 
-if ! command -v mlx_lm.server >/dev/null 2>&1; then
-    echo "ERROR: mlx_lm.server not on PATH. Install with:"
-    echo "  uv tool install mlx-lm"
+if ! command -v mlx_vlm.server >/dev/null 2>&1; then
+    echo "ERROR: mlx_vlm.server not on PATH. Install with:"
+    echo "  uv tool install --with 'uvicorn[standard]' --with fastapi \\"
+    echo "    --with python-multipart --with torch --with torchvision mlx-vlm"
     exit 1
 fi
 
-echo "Starting MLX LLM server..."
-echo "  Model: $MODEL"
-echo "  Port:  $PORT"
+ARGS=(--host 0.0.0.0 --model "$MODEL" --port "$PORT")
+if [ -n "$KV_BITS" ] && [ "$KV_BITS" != "off" ]; then
+    ARGS+=(--kv-bits "$KV_BITS" --kv-quant-scheme "$KV_QUANT_SCHEME")
+    KV_DESC="${KV_BITS}-bit ${KV_QUANT_SCHEME}"
+else
+    KV_DESC="uncompressed"
+fi
+
+echo "Starting MLX LLM server (via mlx-vlm — handles text and vision)..."
+echo "  Model:    $MODEL"
+echo "  Port:     $PORT"
+echo "  KV cache: $KV_DESC"
 echo ""
 echo "The Docker agent connects via: http://host.docker.internal:$PORT/v1"
 echo "──────────────────────────────────────────────────"
 
-exec mlx_lm.server --model "$MODEL" --port "$PORT"
+exec mlx_vlm.server "${ARGS[@]}"
