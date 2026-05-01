@@ -1,15 +1,14 @@
 """LiveKit voice-agent entrypoint.
 
-Thin glue. Heavy lifting lives in dedicated modules:
-  - config.py          : env vars (Config dataclass, single source of truth)
-  - identity.py        : participant → UserIdentity
-  - system_prompt.py   : build_system_prompt + memory_block
-  - llm_client.py      : PatientLLM + build_chat_llm
-  - memory.py          : MemoryProvider Protocol + Mem0Provider
-  - vision_watcher.py  : ambient affect VLM loop
-  - kokoro_tts.py      : TTS plugin (Kokoro)
-  - orpheus_tts.py     : TTS plugin (Orpheus)
-  - voices.py          : voice catalog + backend selection
+Thin glue. Heavy lifting lives in dedicated packages under src/:
+  - config       : Config dataclass — single source of truth for env vars
+  - cues         : shared mood/gesture/pose vocabulary
+  - tools        : @function_tool catalogue
+  - auth/        : signup/login/JWT, DB pool + CRUD, SessionIdentity
+  - llm/         : PatientLLM client, system_prompt assembly
+  - tts/         : Kokoro + Orpheus engines, voice catalog + routing
+  - vision/      : ambient affect VLM watcher
+  - memory/      : MemoryProvider Protocol + Mem0Provider
 
 This file owns:
   - VoiceAgent class (Agent subclass with frame buffer + cue stripping)
@@ -44,20 +43,21 @@ from livekit.agents.utils.images import (  # noqa: E402
 )
 from livekit.plugins import openai, silero  # noqa: E402
 
+from auth import SessionIdentity, init_db  # noqa: E402
 from config import Config  # noqa: E402
-from identity import UserIdentity  # noqa: E402
-from kokoro_tts import KokoroConfig, KokoroTTS  # noqa: E402
-from llm_client import build_chat_llm  # noqa: E402
+from llm import build_chat_llm, build_system_prompt  # noqa: E402
 from memory import build_provider  # noqa: E402
-from orpheus_tts import OrpheusConfig, OrpheusTTS  # noqa: E402
-from system_prompt import build_system_prompt  # noqa: E402
 from tools import TOOL_CATALOG  # noqa: E402
-from vision_watcher import VisionWatcher, VisionWatcherConfig  # noqa: E402
-from voices import (  # noqa: E402
+from tts import (  # noqa: E402
+    KokoroConfig,
+    KokoroTTS,
+    OrpheusConfig,
+    OrpheusTTS,
     backend_for,
     is_known_voice,
     stt_language_for,
 )
+from vision import VisionWatcher, VisionWatcherConfig  # noqa: E402
 
 logger = logging.getLogger("voice-agent")
 
@@ -182,12 +182,18 @@ class VoiceAgent(Agent):
 async def entrypoint(ctx):
     """LiveKit job entrypoint — one invocation per session."""
     config = Config.from_env()
+    # init_db is idempotent — safe to call once per session even though
+    # the token server already initialized the same singleton when this
+    # container started. The pool is shared.
+    db = init_db(config)
     await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
 
-    # Wait for the user to join so we can read their session config and
-    # identity from the participant + metadata.
+    # Wait for the user to join so we can read their session config.
+    # participant.identity is the avatar_id (token server set it after
+    # validating ownership). SessionIdentity does the DB lookup +
+    # wizard-fallback merging.
     participant = await ctx.wait_for_participant()
-    identity = UserIdentity.from_participant(participant)
+    identity = SessionIdentity.from_participant(participant, db=db)
 
     # Voice resolution: explicit voice from the wizard wins; otherwise
     # body-based default for the language. stt_language_for derives the
