@@ -48,21 +48,26 @@ export const AVATARS: Record<string, AvatarMeta> = {
     modelDynamicBones: VROID_DYNAMIC_BONES,
   },
 
-  brunette: { file: 'brunette.glb', category: 'w', body: 'F', label: 'Brunette' },
-  'female-avatar1': { file: 'female-avatar1.glb', category: 'w', body: 'F', label: 'Female 1' },
-  'female-avatar2': { file: 'female-avatar2.glb', category: 'w', body: 'F', label: 'Female 2' },
-  'female-avatar3': { file: 'female-avatar3.glb', category: 'w', body: 'F', label: 'Female 3' },
-  'female-avatar4': { file: 'female-avatar4.glb', category: 'w', body: 'F', label: 'Female 4' },
-  'female-avatar5': { file: 'female-avatar5.glb', category: 'w', body: 'F', label: 'Female 5' },
+  // Names are display labels in the avatar picker rail. Keep them
+  // friendly, internationally pronounceable, and varied — no two
+  // should read as "the same person." The data-key (e.g. `brunette`,
+  // `female-avatar1`) is what the agent.avatar_key references in the
+  // DB, so renaming labels here is safe; renaming keys is not.
+  brunette:         { file: 'brunette.glb',        category: 'w', body: 'F', label: 'Sofia' },
+  'female-avatar1': { file: 'female-avatar1.glb',  category: 'w', body: 'F', label: 'Aria' },
+  'female-avatar2': { file: 'female-avatar2.glb',  category: 'w', body: 'F', label: 'Maya' },
+  'female-avatar3': { file: 'female-avatar3.glb',  category: 'w', body: 'F', label: 'Luna' },
+  'female-avatar4': { file: 'female-avatar4.glb',  category: 'w', body: 'F', label: 'Layla' },
+  'female-avatar5': { file: 'female-avatar5.glb',  category: 'w', body: 'F', label: 'Iris' },
 
-  david: { file: 'david.glb', category: 'm', body: 'M', label: 'David' },
-  avatar3: { file: 'avatar3.glb', category: 'm', body: 'M', label: 'Avatar 3' },
-  'male-avatar1': { file: 'male-avatar1.glb', category: 'm', body: 'M', label: 'Male 1' },
-  'male-avatar2': { file: 'male-avatar2.glb', category: 'm', body: 'M', label: 'Male 2' },
-  'male-avatar3': { file: 'male-avatar3.glb', category: 'm', body: 'M', label: 'Male 3' },
-  'male-avatar4': { file: 'male-avatar4.glb', category: 'm', body: 'M', label: 'Male 4' },
-  'male-avatar5': { file: 'male-avatar5.glb', category: 'm', body: 'M', label: 'Male 5' },
-  'male-avatar6': { file: 'male-avatar6.glb', category: 'm', body: 'M', label: 'Male 6' },
+  david:            { file: 'david.glb',           category: 'm', body: 'M', label: 'David' },
+  avatar3:          { file: 'avatar3.glb',         category: 'm', body: 'M', label: 'Marcus' },
+  'male-avatar1':   { file: 'male-avatar1.glb',    category: 'm', body: 'M', label: 'Leo' },
+  'male-avatar2':   { file: 'male-avatar2.glb',    category: 'm', body: 'M', label: 'Ezra' },
+  'male-avatar3':   { file: 'male-avatar3.glb',    category: 'm', body: 'M', label: 'Kai' },
+  'male-avatar4':   { file: 'male-avatar4.glb',    category: 'm', body: 'M', label: 'Theo' },
+  'male-avatar5':   { file: 'male-avatar5.glb',    category: 'm', body: 'M', label: 'Felix' },
+  'male-avatar6':   { file: 'male-avatar6.glb',    category: 'm', body: 'M', label: 'Mateo' },
 };
 
 export const DEFAULT_AVATAR_KEY = 'brunette';
