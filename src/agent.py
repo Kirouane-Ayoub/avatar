@@ -207,16 +207,18 @@ async def entrypoint(ctx):
         voice = config.pick_voice(language, identity.body)
     backend = backend_for(voice)
 
-    # Tool catalog filter — keep only tools the wizard requested.
-    tools = [
-        TOOL_CATALOG[t]["tool"]
-        for t in identity.requested_tool_ids
-        if t in TOOL_CATALOG
+    # Tool catalog filter — keep only tools the wizard requested AND
+    # that exist in the catalog. tool_ids mirrors the resolved set so the
+    # system prompt can mention exactly the tools that are actually wired
+    # (otherwise the LLM hallucinates calls to tools it doesn't have).
+    tool_ids = [
+        t for t in identity.requested_tool_ids if t in TOOL_CATALOG
     ]
+    tools = [TOOL_CATALOG[t]["tool"] for t in tool_ids]
 
     # Persistent memory: NullProvider when memory is disabled in config.
     # Recall happens once at session start; the result is folded into
-    # the system prompt so Lisa "knows" prior facts before her first
+    # the system prompt so the avatar "knows" prior facts before its first
     # reply.
     memory = build_provider(config)
     _recall_t0 = time.monotonic()
@@ -224,6 +226,26 @@ async def entrypoint(ctx):
     _recall_ms = round((time.monotonic() - _recall_t0) * 1000)
     if recalled:
         logger.info("recalled %d chars for user=%s", len(recalled), identity.id)
+
+    # Short-term cross-session recall: pull the last raw turns from the
+    # transcripts table so the avatar can pick up where the prior session
+    # left off ("we were just talking about X"). This is verbatim history
+    # — different from Mem0's distilled facts above. Best-effort: a DB
+    # hiccup must NOT block session start, so swallow any exception.
+    recent_turns: list = []
+    try:
+        recent_turns = await asyncio.to_thread(
+            db.recent_transcripts, identity.id, 20
+        )
+        logger.info(
+            "recalled %d recent turns for avatar=%s",
+            len(recent_turns), identity.id,
+        )
+    except Exception:
+        logger.exception(
+            "recent_transcripts failed for avatar=%s — continuing without it",
+            identity.id,
+        )
 
     logger.info(
         "Session: name=%s language=%s voice=%s backend=%s tools=%s "
@@ -253,11 +275,29 @@ async def entrypoint(ctx):
     # Surface session-start recall latency to the metrics pill.
     _publish({"type": "memory", "op": "read", "ms": _recall_ms})
 
-    async def _record_turn_metric(uid: str, role: str, text: str) -> None:
-        """Wrap memory.record_turn with timing publish so MEM W lights
-        up the UI metrics pill. Async — does NOT block the next turn."""
+    # ── Long-term memory write batching ─────────────────────────────────
+    # Per-turn fact extraction was firing 2 LLM calls per exchange (one
+    # for user, one for assistant) even when most turns carry no new
+    # facts. Buffer USER messages only and flush every N turns. Mem0
+    # extracts once over the whole batch — fewer LLM calls, and the
+    # extractor gets to reason over multiple turns at once for richer
+    # facts ("user has been talking about Madrid all session" instead of
+    # ten micro-facts each turn).
+    USER_TURN_BATCH_SIZE = 10
+    user_turn_buffer: list[dict] = []
+
+    async def _flush_memory_batch(reason: str) -> None:
+        """Send any buffered user turns to memory in one extraction
+        call. Idempotent — if buffer is empty, no-op. Reason string
+        is just for the log so we can tell "batch full" from "session
+        end" flushes apart."""
+        if not user_turn_buffer:
+            return
+        batch = list(user_turn_buffer)
+        user_turn_buffer.clear()
+        logger.info("memory.flush(%s): %d user turns", reason, len(batch))
         t0 = time.monotonic()
-        await memory.record_turn(uid, role, text)
+        await memory.record_batch(identity.id, batch)
         _publish(
             {
                 "type": "memory",
@@ -273,6 +313,8 @@ async def entrypoint(ctx):
             backend=backend,
             language=language,
             recalled_memory=recalled,
+            recent_turns=recent_turns,
+            tool_ids=tool_ids,
         ),
         tools=tools,
         publish_cue=_publish_cue,
@@ -399,15 +441,51 @@ async def entrypoint(ctx):
     def on_conversation_item(event):
         msg = event.item
 
-        # Persist the turn to memory regardless of metrics presence.
-        # Stripped of cue tags so memory doesn't see "[mood:happy] hi".
-        # Best-effort: any failure is logged inside the provider.
-        if msg.role in ("user", "assistant"):
-            text = (msg.text_content or "").strip()
-            if msg.role == "assistant":
-                text = ANY_BRACKET_RE.sub("", text).strip()
-            if text:
-                asyncio.ensure_future(_record_turn_metric(identity.id, msg.role, text))
+        # `conversation_item_added` fires for several event types — chat
+        # messages (have .role + .text_content), AgentHandoff events
+        # (don't), and possibly future event types. Guard against any
+        # event that doesn't look like a chat message before reading
+        # role/text_content. Without this, AgentHandoff trips an
+        # AttributeError on every handoff and spams the log.
+        if not hasattr(msg, "role"):
+            return
+
+        # Pull text once for both transcript-write and memory-buffer paths.
+        text = (msg.text_content or "").strip()
+
+        # Short-term memory: persist BOTH sides verbatim so the next
+        # session can recall them. Strip cue tags from assistant text so
+        # we don't store "[mood:happy][gesture:handup] hey!" — the user
+        # never saw the brackets, the prompt shouldn't either. Off the
+        # hot path via to_thread so the DB write never stalls the voice
+        # loop. Errors are swallowed inside record_transcript's caller.
+        if text and msg.role in ("user", "assistant"):
+            stored_text = (
+                CUE_RE.sub("", text).strip() if msg.role == "assistant" else text
+            )
+            if stored_text:
+
+                async def _persist(role=msg.role, body=stored_text):
+                    try:
+                        await asyncio.to_thread(
+                            db.record_transcript, identity.id, role, body
+                        )
+                    except Exception:
+                        logger.exception(
+                            "record_transcript failed avatar=%s role=%s",
+                            identity.id, role,
+                        )
+
+                asyncio.ensure_future(_persist())
+
+        # Long-term memory: USER messages only (assistant turns rarely
+        # carry new facts about the user). Buffer per-session and flush
+        # every USER_TURN_BATCH_SIZE turns + at session end. Drops the
+        # extraction-LLM call rate by ~10× vs per-turn.
+        if msg.role == "user" and text:
+            user_turn_buffer.append({"role": "user", "content": text})
+            if len(user_turn_buffer) >= USER_TURN_BATCH_SIZE:
+                asyncio.ensure_future(_flush_memory_batch("batch full"))
 
         # Pipeline metrics → UI pill
         if not hasattr(msg, "metrics") or not msg.metrics:
@@ -463,6 +541,15 @@ async def entrypoint(ctx):
     # agent._last_image_url, idle-gates against AgentSession state.
     if config.vlm_base_url:
         await _start_vision_watcher(config, session, agent, _publish_cue, ctx)
+
+    # Flush any unflushed user-turn batch when the session ends, so we
+    # don't lose the tail of the conversation if the user disconnects
+    # mid-batch (most sessions probably end with <10 user turns and
+    # would otherwise lose ALL their facts to the bin).
+    async def _shutdown_flush_memory():
+        await _flush_memory_batch("session end")
+
+    ctx.add_shutdown_callback(_shutdown_flush_memory)
 
     await session.generate_reply(
         user_input=(
