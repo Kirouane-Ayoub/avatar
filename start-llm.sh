@@ -25,7 +25,7 @@ if [ -f .env ]; then
     set +a
 fi
 
-MODEL="${1:-${LLM_MODEL:-mlx-community/Qwen3.6-27B-4bit}}"
+MODEL="${1:-${LLM_MODEL:-mlx-community/Qwen3.5-9B-MLX-4bit}}"
 PORT="${2:-${LLM_PORT:-8090}}"
 KV_BITS="${LLM_KV_BITS:-3.5}"
 KV_QUANT_SCHEME="${LLM_KV_QUANT_SCHEME:-turboquant}"
