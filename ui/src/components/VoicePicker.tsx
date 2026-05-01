@@ -38,6 +38,26 @@ function gradeTier(grade: string): 0 | 1 | 2 | 3 | 4 {
   return 0;
 }
 
+// Human-readable tier description for tooltips. The pips alone look
+// decorative without context — hovering should explain what they mean.
+function tierLabel(tier: 0 | 1 | 2 | 3 | 4): string {
+  return ['Untested', 'Basic quality', 'Decent quality', 'Good quality', 'Best quality'][tier];
+}
+
+// Friendly backend names. Users don't know what "Kokoro" / "Orpheus" mean.
+// Show plain-English labels in the chips; keep the technical name in
+// a tooltip for users who care.
+const BACKEND_LABELS: Record<VoiceBackend, { label: string; hint: string }> = {
+  kokoro: {
+    label: 'Standard',
+    hint: 'Kokoro — fast, lightweight, 8+ accents. Best for everyday chat.',
+  },
+  orpheus: {
+    label: 'Expressive',
+    hint: 'Orpheus — slower but richer, more emotion. Best for deeper conversations.',
+  },
+};
+
 function parseVoice(v: VoiceInfo) {
   const rest = v.id.includes('_') ? v.id.slice(v.id.indexOf('_') + 1) : v.id;
   const firstName = rest.replace(/_/g, ' ');
@@ -62,8 +82,13 @@ function PlayGlyph({ state }: { state: 'idle' | 'loading' | 'playing' }) {
 }
 
 function GradePips({ tier }: { tier: 0 | 1 | 2 | 3 | 4 }) {
+  const label = tierLabel(tier);
   return (
-    <span className={`grade-pips tier-${tier}`} aria-label={`quality tier ${tier} of 4`}>
+    <span
+      className={`grade-pips tier-${tier}`}
+      title={`${label} (${tier}/4)`}
+      aria-label={`${label} — quality tier ${tier} of 4`}
+    >
       {[0, 1, 2, 3].map((i) => (
         <span key={i} className={i < tier ? 'on' : 'off'} />
       ))}
@@ -148,11 +173,22 @@ export function VoicePicker({ value, onChange, name }: Props) {
         );
       });
     list.sort((a, b) => {
+      // Pin the currently-selected voice to the top so the user
+      // always sees their pick first, even after filter changes.
+      if (a.id === value && b.id !== value) return -1;
+      if (b.id === value && a.id !== value) return 1;
       if (a.language !== b.language) return a.language.localeCompare(b.language);
       return gradeRank(a.grade) - gradeRank(b.grade);
     });
     return list;
-  }, [voices, query, langFilter, backendFilter]);
+  }, [voices, query, langFilter, backendFilter, value]);
+
+  // Resolve the currently-selected voice for the header banner. Empty
+  // value means "auto" — agent picks one based on avatar gender + language.
+  const selectedVoice = useMemo(() => {
+    if (!value) return null;
+    return voices.map(parseVoice).find((v) => v.id === value) ?? null;
+  }, [voices, value]);
 
   const play = async (voice: ReturnType<typeof parseVoice>) => {
     const toggleOff = playingId === voice.id || loadingId === voice.id;
@@ -202,6 +238,37 @@ export function VoicePicker({ value, onChange, name }: Props) {
 
   return (
     <div className="voice-picker">
+      {/* "Currently using" banner — answers the user's #1 question
+          ("which voice did I pick?") without scrolling, and surfaces
+          the auto-pick fallback when nothing's selected so users know
+          they don't *have* to pick. */}
+      <div className="voice-current">
+        {selectedVoice ? (
+          <>
+            <span className="voice-current-label">Currently using</span>
+            <strong className="voice-current-name">{selectedVoice.displayName}</strong>
+            <span className="voice-current-meta">
+              {selectedVoice.language} · {selectedVoice.gender === 'F' ? 'female' : 'male'}
+            </span>
+            <button
+              type="button"
+              className="voice-current-reset"
+              onClick={() => onChange('')}
+              title="Let the system pick a voice based on the avatar"
+            >
+              reset to auto
+            </button>
+          </>
+        ) : (
+          <>
+            <span className="voice-current-label">No voice picked</span>
+            <span className="voice-current-auto">
+              we'll auto-pick one based on your avatar — or browse below
+            </span>
+          </>
+        )}
+      </div>
+
       <div className="voice-picker-head">
         <input
           type="text"
@@ -215,22 +282,25 @@ export function VoicePicker({ value, onChange, name }: Props) {
               type="button"
               className={`lang-chip${backendFilter === 'all' ? ' active' : ''}`}
               onClick={() => setBackendFilter('all')}
+              title="Show every voice across both engines"
             >
-              All TTS <span className="lang-count">{voices.length}</span>
+              All voices <span className="lang-count">{voices.length}</span>
             </button>
             <button
               type="button"
               className={`lang-chip${backendFilter === 'kokoro' ? ' active' : ''}`}
               onClick={() => setBackendFilter('kokoro')}
+              title={BACKEND_LABELS.kokoro.hint}
             >
-              Kokoro <span className="lang-count">{backendCounts.kokoro}</span>
+              {BACKEND_LABELS.kokoro.label} <span className="lang-count">{backendCounts.kokoro}</span>
             </button>
             <button
               type="button"
               className={`lang-chip${backendFilter === 'orpheus' ? ' active' : ''}`}
               onClick={() => setBackendFilter('orpheus')}
+              title={BACKEND_LABELS.orpheus.hint}
             >
-              Orpheus <span className="lang-count">{backendCounts.orpheus}</span>
+              {BACKEND_LABELS.orpheus.label} <span className="lang-count">{backendCounts.orpheus}</span>
             </button>
           </div>
         )}
