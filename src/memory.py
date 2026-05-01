@@ -33,8 +33,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from typing import Optional, Protocol
+
+from config import Config
 
 logger = logging.getLogger("memory")
 
@@ -161,8 +162,12 @@ class Mem0Provider:
         self._memory = Memory.from_config(config)
         logger.info(
             "Mem0Provider initialized: pg=%s:%d/%s, llm=%s, embed=%s/%s%s",
-            pg_host, pg_port, pg_dbname, llm_model,
-            embedder_provider, embedder_model,
+            pg_host,
+            pg_port,
+            pg_dbname,
+            llm_model,
+            embedder_provider,
+            embedder_model,
             f" @ {embedder_base_url}" if embedder_base_url else "",
         )
 
@@ -189,14 +194,20 @@ class Mem0Provider:
         # judgment in real time. "NONE" means Mem0 decided no new fact
         # was worth recording from this turn (very common for filler).
         try:
-            items = result.get("results", []) if isinstance(result, dict) else (result or [])
+            items = (
+                result.get("results", [])
+                if isinstance(result, dict)
+                else (result or [])
+            )
             if not items:
                 logger.info("memory.write -> no facts extracted user=%s", user_id)
             else:
                 for it in items:
                     event = it.get("event", "?")
                     mem = (it.get("memory") or "").strip()
-                    logger.info("memory.write -> %s: %r user=%s", event, mem[:120], user_id)
+                    logger.info(
+                        "memory.write -> %s: %r user=%s", event, mem[:120], user_id
+                    )
         except Exception:
             # Diagnostic logging must never break the call site — if the
             # response shape changes upstream, just log raw and move on.
@@ -215,11 +226,16 @@ class Mem0Provider:
             # `search(query=..., limit=N)` keyed off the latest turn.
             if not query:
                 results = await asyncio.to_thread(
-                    self._memory.get_all, user_id=user_id, limit=20,
+                    self._memory.get_all,
+                    user_id=user_id,
+                    limit=20,
                 )
             else:
                 results = await asyncio.to_thread(
-                    self._memory.search, query=query, user_id=user_id, limit=10,
+                    self._memory.search,
+                    query=query,
+                    user_id=user_id,
+                    limit=10,
                 )
         except Exception:
             logger.exception("memory.read FAILED user=%s mode=%s", user_id, mode)
@@ -237,7 +253,9 @@ class Mem0Provider:
             if mem:
                 lines.append(f"- {mem.strip()}")
         if not lines:
-            logger.info("memory.read -> 0 usable hits (raw=%d) user=%s", len(items), user_id)
+            logger.info(
+                "memory.read -> 0 usable hits (raw=%d) user=%s", len(items), user_id
+            )
             return ""
         # Per-item log so you can see exactly what got injected into the
         # system prompt. Truncated so a session with 20 long memories
@@ -248,52 +266,38 @@ class Mem0Provider:
         return "\n".join(lines)
 
 
-def build_provider() -> MemoryProvider:
-    """Factory. Returns a real provider if memory env vars are set,
+def build_provider(config: Config) -> MemoryProvider:
+    """Factory. Returns a real provider if memory is enabled in config,
     NullProvider otherwise. Single call site in agent.py — keeps the
-    config decision out of the entrypoint."""
-    pg_host = os.getenv("MEM0_PG_HOST")
-    if not pg_host:
-        logger.info("memory disabled: MEM0_PG_HOST not set")
+    enable/disable decision out of the entrypoint.
+
+    All env reading happens in config.py — this function just consumes
+    the typed Config dataclass.
+    """
+    if not config.memory_enabled:
+        logger.info("memory disabled: MEM0_PG_HOST not set in config")
         return NullProvider()
     try:
-        embedder_dims_env = os.getenv("MEM0_EMBEDDER_DIMS")
         return Mem0Provider(
-            pg_host=pg_host,
-            pg_port=int(os.getenv("MEM0_PG_PORT", "5432")),
-            pg_user=os.getenv("MEM0_PG_USER", "mem0"),
-            pg_password=os.getenv("MEM0_PG_PASSWORD", "mem0"),
-            pg_dbname=os.getenv("MEM0_PG_DBNAME", "mem0"),
-            llm_base_url=os.getenv("MEM0_LLM_BASE_URL")
-            or os.environ["LLM_BASE_URL"],
-            llm_api_key=os.getenv("MEM0_LLM_API_KEY")
-            or os.getenv("LLM_API_KEY", "none"),
-            llm_model=os.getenv("MEM0_LLM_MODEL")
-            or os.environ["LLM_MODEL"],
-            embedder_provider=os.getenv("MEM0_EMBEDDER_PROVIDER", "huggingface"),
-            embedder_model=os.getenv("MEM0_EMBEDDER", "BAAI/bge-small-en-v1.5"),
-            embedder_base_url=os.getenv("MEM0_EMBEDDER_BASE_URL"),
-            embedder_api_key=os.getenv("MEM0_EMBEDDER_API_KEY"),
-            embedder_dims=int(embedder_dims_env) if embedder_dims_env else None,
+            pg_host=config.mem0_pg_host,
+            pg_port=config.mem0_pg_port,
+            pg_user=config.mem0_pg_user,
+            pg_password=config.mem0_pg_password,
+            pg_dbname=config.mem0_pg_dbname,
+            llm_base_url=config.mem0_llm_base_url,
+            llm_api_key=config.mem0_llm_api_key,
+            llm_model=config.mem0_llm_model,
+            embedder_provider=config.mem0_embedder_provider,
+            embedder_model=config.mem0_embedder,
+            embedder_base_url=config.mem0_embedder_base_url,
+            embedder_api_key=config.mem0_embedder_api_key,
+            embedder_dims=config.mem0_embedder_dims,
         )
     except Exception:
         logger.exception("memory init failed — falling back to NullProvider")
         return NullProvider()
 
 
-def memory_block(recalled: str) -> str:
-    """Format recalled memory as a system-prompt section.
-
-    Returns an empty string when nothing recalled, so the caller can
-    safely string-concat the result into the system prompt without
-    conditional logic.
-    """
-    if not recalled.strip():
-        return ""
-    return (
-        "\n\nMEMORY (things you know about your friend from past conversations):\n"
-        f"{recalled}\n"
-        "Use this naturally when relevant — don't recite it back, just let it "
-        "shape what you say. Don't say things like 'I remember you mentioned X', "
-        "just KNOW X like a real friend would."
-    )
+# Note: memory_block() moved to system_prompt.py — it's about prompt
+# formatting, not memory storage. Importers should now do:
+#   from system_prompt import memory_block
