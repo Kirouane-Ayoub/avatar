@@ -174,7 +174,7 @@ export function SetupWizard({ setup, onChange, onStart, starting, error }: Props
                 type="text"
                 maxLength={60}
                 value={setup.name}
-                placeholder="Lisa"
+                placeholder="Liva"
                 onChange={(e) => onChange({ name: e.target.value })}
               />
             </div>
