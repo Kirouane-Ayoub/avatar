@@ -1,7 +1,7 @@
 """App database — users + per-user profile.
 
 Uses the existing postgres-memory container (same DB as Mem0). The
-users table sits alongside Mem0's lisa_memories. Splitting later is
+users table sits alongside Mem0's memories. Splitting later is
 just an env-var swap (APP_PG_*).
 
 This module owns:
@@ -48,7 +48,7 @@ logger = logging.getLogger("db")
 # Architecture: users authenticate; AVATARS are the chat-context
 # entities. A user can own multiple avatars (different personas, voices,
 # 3D models). Each avatar's id is what Mem0 keys memories by — so
-# memories are per-avatar, not per-user. This is what makes "Lisa
+# memories are per-avatar, not per-user. This is what makes "Sofia
 # remembers your dog" different from "Marcus remembers your dog".
 #
 # `mood` is intentionally NOT on avatars — it's a transient UI preview
@@ -94,6 +94,25 @@ CREATE TABLE IF NOT EXISTS avatars (
 );
 CREATE INDEX IF NOT EXISTS avatars_user_id_idx ON avatars (user_id);
 CREATE INDEX IF NOT EXISTS avatars_last_used_idx ON avatars (user_id, last_used_at DESC);
+
+-- Short-term memory: verbatim transcript per (avatar, turn). Used to
+-- show the avatar "what we just talked about" at the next session
+-- start (cross-session recency). Long-term semantic recall is Mem0's
+-- job — this table is just the recent N raw lines, queried by
+-- (avatar_id, created_at DESC LIMIT N) at session start.
+--
+-- ON DELETE CASCADE through avatar (and through user via avatar) so
+-- delete-account / delete-avatar cleans these up automatically.
+CREATE TABLE IF NOT EXISTS transcripts (
+    id              BIGSERIAL    PRIMARY KEY,
+    avatar_id       UUID         NOT NULL REFERENCES avatars(id) ON DELETE CASCADE,
+    role            TEXT         NOT NULL CHECK (role IN ('user', 'assistant')),
+    text            TEXT         NOT NULL,
+    created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+-- Index drives the "last N for this avatar" query on every session start.
+CREATE INDEX IF NOT EXISTS transcripts_avatar_ts_idx
+    ON transcripts (avatar_id, created_at DESC);
 """
 
 
@@ -107,6 +126,19 @@ class User:
     display_name: str
     created_at: datetime
     updated_at: datetime
+
+
+@dataclass(frozen=True)
+class Transcript:
+    """One verbatim turn of the conversation. Cheap raw history —
+    different from Mem0's distilled facts. Used to give the avatar
+    cross-session short-term recall ("we were just talking about X")."""
+
+    id: int
+    avatar_id: str
+    role: str  # "user" or "assistant"
+    text: str
+    created_at: datetime
 
 
 @dataclass(frozen=True)
@@ -214,7 +246,7 @@ class Db:
 
         NOTE: this only touches the `users` table. Mem0 memories are
         wiped separately via memory.forget_user — they live in
-        lisa_memories which Mem0 owns the schema of.
+        the memories table which Mem0 owns the schema of.
         """
         with self._pool.connection() as conn:
             with conn.cursor() as cur:
@@ -337,6 +369,47 @@ class Db:
                 cur.execute("DELETE FROM avatars WHERE id = %s", (avatar_id,))
                 return cur.rowcount > 0
 
+    # ── Transcripts (cross-session short-term memory) ───────────────────
+    def record_transcript(
+        self, avatar_id: str, role: str, text: str
+    ) -> None:
+        """Append one verbatim turn to the transcripts table. Called for
+        BOTH user and assistant turns. Cheap insert; no LLM in the
+        path. The row's id auto-increments via BIGSERIAL.
+
+        Best-effort: a DB hiccup shouldn't break the conversation. The
+        agent calls this via `asyncio.to_thread(...)` then ignores any
+        exception so the failure doesn't bubble into the voice loop.
+        """
+        if not text or not text.strip():
+            return
+        with self._pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO transcripts (avatar_id, role, text) VALUES (%s, %s, %s)",
+                    (avatar_id, role, text),
+                )
+
+    def recent_transcripts(
+        self, avatar_id: str, limit: int = 20
+    ) -> list[Transcript]:
+        """Return the most recent N turns for this avatar in
+        CHRONOLOGICAL order (oldest first), so the system prompt can
+        present them as a normal dialogue. Internally we ORDER BY DESC
+        then reverse — that way the index covers the "last N" query
+        even as the table grows.
+        """
+        with self._pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT * FROM transcripts WHERE avatar_id = %s "
+                    "ORDER BY created_at DESC LIMIT %s",
+                    (avatar_id, limit),
+                )
+                rows = cur.fetchall()
+        # Flip to chronological for prompt injection.
+        return list(reversed([_row_to_transcript(r) for r in rows]))
+
 
 def _row_to_user(row: dict) -> User:
     """Translate a SELECT * row into a typed User."""
@@ -346,6 +419,17 @@ def _row_to_user(row: dict) -> User:
         display_name=row["display_name"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+    )
+
+
+def _row_to_transcript(row: dict) -> Transcript:
+    """Translate a SELECT * row from the transcripts table into a typed Transcript."""
+    return Transcript(
+        id=int(row["id"]),
+        avatar_id=str(row["avatar_id"]),
+        role=row["role"],
+        text=row["text"],
+        created_at=row["created_at"],
     )
 
 
