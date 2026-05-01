@@ -129,6 +129,14 @@ export function DevicePanel({
       {cameraOn && (
         <div className="stage-cam-bubble">
           <video ref={videoRef} autoPlay muted playsInline />
+          {/* Overlays — small, low-contrast so they don't fight the
+              avatar canvas behind them. The "live" dot pulses to make
+              it obvious this is real-time, not a thumbnail. */}
+          <span className="stage-cam-live" aria-hidden>
+            <span className="stage-cam-live-dot" />
+            <span className="stage-cam-live-text">live</span>
+          </span>
+          <span className="stage-cam-label">you</span>
         </div>
       )}
     </>
