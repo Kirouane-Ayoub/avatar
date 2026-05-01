@@ -253,7 +253,15 @@ export function useSession(
       segments: TranscriptionSegment[],
       participant?: Participant,
     ) => {
-      const isAgent = participant?.identity !== 'user';
+      // Used to compare `participant.identity !== 'user'` back when the
+      // token server hardcoded the local identity to "user". Now the
+      // local identity is the avatar UUID, so that check is always true
+      // and every message looked like an agent reply (same side, same
+      // monogram). Compare against the local participant's identity
+      // instead — the local one is the human; everything else is the
+      // agent (or a future remote participant).
+      const localId = room.localParticipant?.identity;
+      const isAgent = !!participant?.identity && participant.identity !== localId;
       const role: 'user' | 'agent' = isAgent ? 'agent' : 'user';
       setTranscripts((prev) => {
         const next = [...prev];
