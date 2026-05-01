@@ -2,11 +2,21 @@
 # Start the full Liva voice agent pipeline
 # Usage: ./run.sh [start|stop|restart|logs|status]
 #
-# Orpheus TTS and the ambient affect VLM (mlx-vlm) both start by default.
-# Opt out per-process by setting the env var to 0:
+# Orpheus TTS, ambient affect VLM (mlx-vlm), and Ollama embedding-model
+# pre-flight all run by default. Opt out per-process by setting the env
+# var to 0:
 #   ORPHEUS=0 ./run.sh start    # Kokoro-only, no Orpheus
 #   VLM=0 ./run.sh start        # no ambient affect watcher
-#   ORPHEUS=0 VLM=0 ./run.sh start    # bare minimum (LLM + Kokoro + Docker)
+#   OLLAMA=0 ./run.sh start     # skip Ollama check + model pull
+#                                  (memory will fail unless Ollama is up
+#                                  and the model is already pulled)
+#   ORPHEUS=0 VLM=0 OLLAMA=0 ./run.sh start    # bare minimum
+#
+# About Ollama: it runs as its own background service on macOS (launched
+# by the Ollama app or `brew services start ollama`). This script does
+# NOT start the Ollama daemon — running `ollama serve` while the app is
+# also running causes a port conflict on 11434. We only check that it's
+# reachable and pull the embedding model (idempotent, fast if cached).
 
 set -e
 
@@ -23,7 +33,7 @@ if [ -f .env ]; then
     set +a
 fi
 
-LLM_MODEL="${LLM_MODEL:-mlx-community/Qwen3.6-27B-4bit}"
+LLM_MODEL="${LLM_MODEL:-mlx-community/Qwen3.5-9B-MLX-4bit}"
 LLM_PORT="${LLM_PORT:-8090}"
 LLM_PID_FILE="$SCRIPT_DIR/.llm.pid"
 
@@ -199,6 +209,38 @@ stop_vlm() {
     fi
 }
 
+prep_ollama() {
+    # Ollama-as-embeddings pre-flight. We do NOT manage Ollama's daemon
+    # (it runs as a macOS service / menu-bar app). We only verify it's
+    # reachable and pull the embedding model so the first Mem0 write
+    # doesn't fail with "model not found".
+    if [ "${OLLAMA:-1}" != "1" ]; then
+        echo "[Ollama] Skipped (OLLAMA=0)"
+        return
+    fi
+    if ! command -v ollama >/dev/null 2>&1; then
+        echo "[Ollama] WARNING: ollama not on PATH. Memory feature will fail."
+        echo "  Install with:  brew install ollama   # or app from ollama.com"
+        echo "  Then re-run ./run.sh start to pull the embedding model."
+        return
+    fi
+    if ! curl -s "http://localhost:11434/api/tags" >/dev/null 2>&1; then
+        echo "[Ollama] WARNING: port 11434 not reachable. Start the Ollama app or:"
+        echo "  brew services start ollama"
+        echo "  (memory feature will fail until Ollama is running)"
+        return
+    fi
+    # Use whatever the agent will ask for; falls back to all-minilm
+    # which is what the .env.example documents.
+    local model="${MEM0_EMBEDDER:-all-minilm}"
+    echo "[Ollama] Reachable. Pulling embedding model: $model (idempotent)"
+    if ollama pull "$model" 2>&1 | tail -3; then
+        echo "[Ollama] Ready (model $model available)"
+    else
+        echo "[Ollama] WARNING: pull failed for $model — check the model name"
+    fi
+}
+
 start_docker() {
     echo "[Docker] Starting services..."
     docker-compose up --build -d --remove-orphans
@@ -234,6 +276,13 @@ except: print('   Not responding')
         echo "   Stopped"
     fi
     echo ""
+    echo "── Ollama (embeddings, host service — see CLAUDE.md) ──"
+    if curl -s "http://localhost:11434/api/tags" > /dev/null 2>&1; then
+        echo "   Reachable at http://localhost:11434"
+    else
+        echo "   Not reachable (install/start Ollama if memory needs embeddings)"
+    fi
+    echo ""
     echo "── Docker ──"
     docker-compose ps --format "   {{.Name}}: {{.Status}}" 2>/dev/null || echo "   No containers"
     echo ""
@@ -258,6 +307,7 @@ case "${1:-start}" in
         start_llm
         if [ "${ORPHEUS:-1}" = "1" ]; then start_orpheus; fi
         if [ "${VLM:-1}" = "1" ]; then start_vlm; fi
+        prep_ollama
         start_docker
         echo ""
         echo "Liva is ready at http://localhost:3000"
@@ -278,6 +328,7 @@ case "${1:-start}" in
         start_llm
         if [ "${ORPHEUS:-1}" = "1" ]; then start_orpheus; fi
         if [ "${VLM:-1}" = "1" ]; then start_vlm; fi
+        prep_ollama
         start_docker
         echo ""
         echo "Liva is ready at http://localhost:3000"
