@@ -45,7 +45,7 @@ class OrpheusConfig:
     # Larger value = fewer chunk boundaries = fewer SNAC stream-decode
     # artifacts (mlx-audio's streaming decode doesn't use a sliding window
     # across chunks, so words straddling a boundary get a doubled syllable
-    # / "echo" feel). 2.0 means most short Lisa replies fit in one chunk.
+    # / "echo" feel). 2.0 means most short replies fit in one chunk.
     # Trade-off: TTFB rises to ~the first chunk's wall-clock generation
     # time. On M4 Pro Metal that's still well under the perceived
     # response time of the LLM, so net UX is better.
