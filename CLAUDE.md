@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-Avatar is a real-time speech-to-speech voice agent stack built with LiveKit. The name is a nod to the Hollywood craft of dubbing voice and sound onto a face that's already moving — which is literally what the lipsync + TTS pipeline does. The default persona ships as **Liva** but is fully configurable per session (name, persona, voice, avatar, tools) via the setup wizard. The system features a 3D animated avatar with lip sync, vision capabilities (camera input), function calling (tools), and latency metrics. The pipeline: User speaks → STT (Faster Whisper) → LLM (default `mlx-community/Qwen3.6-27B-4bit` — a vision-language model — running natively via `mlx_vlm.server`, OpenAI-compatible, accepts both text and image_url content) → TTS (Kokoro for word-timestamped lipsync, or Orpheus via `mlx-audio` for higher quality) → Avatar lip sync + audio playback.
+Avatar is a real-time speech-to-speech voice agent stack built with LiveKit. The name is a nod to the Hollywood craft of dubbing voice and sound onto a face that's already moving — which is literally what the lipsync + TTS pipeline does. The default persona ships as **Liva** but is fully configurable per session (name, persona, voice, avatar, tools) via the setup wizard. The system features a 3D animated avatar with lip sync, vision capabilities (camera input), function calling (tools), and latency metrics. The pipeline: User speaks → STT (Faster Whisper) → LLM (default `mlx-community/Qwen3.5-9B-MLX-4bit`, running natively via `mlx_vlm.server` because the same server transparently handles VL models too — set `LLM_MODEL=mlx-community/Qwen3.6-27B-4bit` or any `*-VL-*` model to enable in-conversation image_url content) → TTS (Kokoro for word-timestamped lipsync, or Orpheus via `mlx-audio` for higher quality) → Avatar lip sync + audio playback.
 
 ## Running
 
@@ -44,6 +44,13 @@ uv tool install --with 'uvicorn[standard]' --with fastapi \
 # inject them explicitly. WITHOUT --with the server crashes on import.
 uv tool install --with 'uvicorn[standard]' --with fastapi \
   --with python-multipart --with webrtcvad-wheels mlx-audio
+
+# Ollama (for Mem0 embeddings). Ships an OpenAI-compatible /v1/embeddings
+# endpoint out of the box on port 11434, runs as a host service on macOS.
+# Install via brew or the Ollama app from ollama.com, then pull the
+# small embedding model the agent uses by default:
+brew install ollama   # or download the macOS app
+ollama pull all-minilm   # ~46 MB, 384-dim MiniLM
 ```
 
 `mlx-lm` is no longer needed — `run.sh:start_llm` now invokes `mlx_vlm.server`. You can `uv tool uninstall mlx-lm` if you have it.
@@ -118,9 +125,21 @@ Voice fully drives language. `requestToken` (UI) sends `language: languageFromVo
 
 `conversation_item_added` event → extract `transcription_delay`, `llm_node_ttft`, `tts_node_ttfb`, `e2e_latency` from `ChatMessage.metrics`. Also `metrics_collected` (deprecated but still fires) for `STTMetrics.duration` and `TTSMetrics.ttfb`. Published as `{type:"pipeline", …}` on the `metrics` topic; UI renders them as a colored pill (good ≤ green, ok ≤ amber, slow > red).
 
+### Persistent memory (Mem0)
+
+Per-user long-term memory via the Mem0 SDK, **embedded** inside the agent process (not a separate REST server — fewer containers). Storage: the new `postgres-memory` container (pgvector image). Fact-extraction LLM: small VLM at `:5006` by default (keeps the 27B chat LLM free of extraction load). Embeddings: local sentence-transformers (`BAAI/bge-small-en-v1.5`, ~130 MB) cached in the `hf-cache` Docker volume.
+
+Wrapper at `src/memory.py` (Protocol + `Mem0Provider` + `NullProvider`) — the seam so a future `ZepProvider` (or cloud-managed alt) can drop in by changing one line in `agent.py`. `NullProvider` kicks in when `MEM0_PG_HOST` is unset, so memory is fully optional. Best-effort semantics: every call is wrapped in try/except — Mem0 failures NEVER break the conversation pipeline.
+
+Per-user identity comes from `participant.identity`. The token server (`ui/server.py`) currently hardcodes that to `"user"` so today's deployment is single-user. When real auth lands the token server starts issuing per-user identities and the agent picks them up automatically (zero changes to memory code).
+
+Wired in `agent.py` at two points:
+- **Session start**: `memory.recall(user_id)` → injected into the system prompt via `memory_block(...)` so Lisa knows things from prior sessions before her first reply.
+- **`conversation_item_added` event**: `memory.record_turn(user_id, role, text)` for both user and assistant messages. Cue tags stripped from assistant text first so memory doesn't see `[mood:happy]`. Fact extraction runs async inside Mem0 — does NOT block the next turn.
+
 ## Docker Services
 
-All on `avatar-network` bridge. Agent reaches services by container name: `livekit-server:7880`, `kokoro-tts:8880`, `speaches:8000`. Browser connects to LiveKit via `LIVEKIT_EXTERNAL_URL` (localhost). LLM is external (not in compose).
+All on `avatar-network` bridge. Agent reaches services by container name: `livekit-server:7880`, `kokoro-tts:8880`, `speaches:8000`, `postgres-memory:5432`. Browser connects to LiveKit via `LIVEKIT_EXTERNAL_URL` (localhost). LLM is external (not in compose).
 
 Kokoro has ONNX CPU optimizations tuned for M4 Pro (4 threads, parallel execution, reduced chunk size for lower TTFB).
 
