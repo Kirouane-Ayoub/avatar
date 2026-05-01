@@ -64,8 +64,16 @@ export function useTalkingHead(
 
         if (cancelled) return;
         setProgress(null);
-        try { instance.setMood(initialMoodRef.current); } catch { /* mood not loaded yet */ }
-        try { instance.setView(initialViewRef.current); } catch { /* optional */ }
+        try {
+          instance.setMood(initialMoodRef.current);
+        } catch (e) {
+          console.warn('[avatar] initial setMood failed', initialMoodRef.current, e);
+        }
+        try {
+          instance.setView(initialViewRef.current);
+        } catch (e) {
+          console.warn('[avatar] initial setView failed', initialViewRef.current, e);
+        }
         setHead(instance);
       } catch (e) {
         if (!cancelled) {
@@ -89,12 +97,21 @@ export function useTalkingHead(
 
   useEffect(() => {
     if (!head) return;
-    try { head.setMood(mood); } catch { /* ignore */ }
+    console.log('[avatar] setMood', mood);
+    try {
+      head.setMood(mood);
+    } catch (e) {
+      console.warn('[avatar] setMood failed', mood, e);
+    }
   }, [head, mood]);
 
   useEffect(() => {
     if (!head) return;
-    try { head.setView(view); } catch { /* ignore */ }
+    try {
+      head.setView(view);
+    } catch (e) {
+      console.warn('[avatar] setView failed', view, e);
+    }
   }, [head, view]);
 
   return { progress, error, head };
