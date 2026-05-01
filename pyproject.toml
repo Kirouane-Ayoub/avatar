@@ -26,5 +26,19 @@ dependencies = [
 ]
 
 [tool.setuptools]
-py-modules = ["agent", "kokoro_tts", "orpheus_tts", "gen_token"]
+py-modules = [
+    "agent",
+    "config",
+    "cues",
+    "gen_token",
+    "identity",
+    "kokoro_tts",
+    "llm_client",
+    "memory",
+    "orpheus_tts",
+    "system_prompt",
+    "tools",
+    "vision_watcher",
+    "voices",
+]
 package-dir = {"" = "src"}
