@@ -116,7 +116,7 @@ class Config:
     # ── App database (users + future profile / settings tables) ─────────
     # Reuses the postgres-memory container by default — same host/creds,
     # different (or same) database. We keep the users table in the same
-    # `mem0` DB alongside `lisa_memories` to avoid spinning up a second
+    # `mem0` DB alongside `memories` to avoid spinning up a second
     # postgres just for auth. If you ever split, point app_pg_* at a
     # different host.
     app_pg_host: str = "postgres-memory"
