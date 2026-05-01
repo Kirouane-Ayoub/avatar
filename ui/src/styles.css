@@ -234,26 +234,30 @@ code {
   pointer-events: none;
 }
 
+/* Avatar identity pill: top-LEFT corner now (was bottom-center, but
+   that conflicted with the new floating mood strip). Pairs with the
+   view-toggle at top-right to form a clean "preview metadata" row.
+   Solid bg per the backdrop-filter-over-WebGL framerate gotcha (the
+   prior glass blur tanked avatar idle FPS — kept this opaque). */
 .stage-hud {
   position: absolute;
-  bottom: 20px;
-  left: 50%;
-  transform: translateX(-50%);
-  text-align: center;
-  padding: 0.4rem 1rem;
-  background: rgba(9, 9, 11, 0.6);
-  backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  border-radius: 12px;
+  top: 14px;
+  left: 14px;
+  text-align: left;
+  padding: 0.35rem 0.75rem;
+  background: rgba(15, 15, 18, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 999px;
   pointer-events: none;
+  display: inline-flex; align-items: center; gap: 8px;
 }
-.stage-title { font-size: 0.9rem; font-weight: 600; color: #fff; }
+.stage-title { font-size: 0.78rem; font-weight: 600; color: #fff; letter-spacing: -0.005em; }
 .stage-sub {
   font-size: 0.58rem;
   color: #71717a;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  margin-top: 2px;
+  margin-top: 0;
 }
 .kbd-hint { color: #3f3f46; margin-left: 4px; }
 
@@ -304,16 +308,25 @@ code {
 .stage-form::-webkit-scrollbar-thumb { background: #27272a; border-radius: 4px; }
 
 .form-header { margin-bottom: 1.2rem; }
+.form-header-title { min-width: 0; flex: 1; }
 .form-header h2 {
-  font-size: 1.1rem;
+  font-size: 1.25rem;
   font-weight: 600;
   color: #fff;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.015em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.form-header p {
-  font-size: 0.7rem;
+.form-header-sub {
+  font-size: 0.72rem;
   color: #71717a;
-  margin-top: 0.2rem;
+  margin-top: 0.25rem;
+  letter-spacing: 0.005em;
+}
+/* Subtle "saves as you type" hint — same line, dimmer so it doesn't
+   compete with the actual subtitle copy. */
+.form-header-saved-hint {
+  color: #52525b;
+  font-style: italic;
 }
 
 .form-grid {
@@ -379,31 +392,100 @@ code {
 }
 
 /* ── Persona presets ── */
-.persona-field { display: flex; flex-direction: column; gap: 0.5rem; }
+.persona-field { display: flex; flex-direction: column; gap: 0.75rem; }
+
 .persona-presets {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 0.35rem;
+  gap: 0.5rem;
 }
+
+/* Preset cards now show label + one-line teaser. Two-line layout
+   means users can pick at a glance without reading the full prompt
+   from a tooltip. Clicking selects and writes the full text into the
+   shared textarea below. */
 .preset-card {
   background: #18181b;
   border: 1px solid #27272a;
-  border-radius: 8px;
-  padding: 0.5rem 0.4rem;
+  border-radius: 10px;
+  padding: 0.6rem 0.55rem 0.55rem;
   cursor: pointer;
   font-family: inherit;
-  font-size: 0.65rem;
-  font-weight: 500;
-  color: #d4d4d8;
-  text-align: center;
-  transition: all 0.12s;
+  text-align: left;
+  transition: background 0.12s ease, border-color 0.12s ease, transform 0.08s ease;
+  display: flex; flex-direction: column; gap: 3px;
+  min-height: 56px;
 }
 .preset-card:hover { background: #1f1f24; border-color: #3f3f46; }
+.preset-card:active { transform: scale(0.98); }
 .preset-card.active {
-  background: #1e1b4b;
-  border-color: #6366f1;
-  color: #e0e7ff;
+  background: linear-gradient(180deg, rgba(99, 102, 241, 0.15), rgba(99, 102, 241, 0.06));
+  border-color: rgba(99, 102, 241, 0.5);
+  box-shadow: inset 0 0 0 1px rgba(99, 102, 241, 0.15);
 }
+.preset-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #f4f4f5;
+  letter-spacing: -0.005em;
+}
+.preset-card.active .preset-label { color: #e0e7ff; }
+.preset-hint {
+  font-size: 0.66rem;
+  color: #71717a;
+  line-height: 1.3;
+}
+.preset-card.active .preset-hint { color: #a5b4fc; }
+
+/* Custom-text section. Labeled separately so users see "preset OR
+   custom" as a clear two-path choice. The badge appears whenever
+   the textarea contents don't match any preset — confirms to the
+   user that their custom text is what's in effect. */
+.persona-custom { display: flex; flex-direction: column; gap: 4px; }
+.persona-custom-head {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 0.68rem;
+}
+.persona-custom-label {
+  color: #a1a1aa;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  font-size: 0.62rem;
+  font-weight: 500;
+}
+.persona-custom-badge {
+  background: rgba(99, 102, 241, 0.18);
+  color: #c7d2fe;
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  font-size: 0.58rem; font-weight: 600;
+  padding: 1px 6px; border-radius: 999px;
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.persona-charcount {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.62rem;
+  color: #52525b;
+}
+.persona-charcount.warn { color: #facc15; }
+.persona-charcount.over { color: #f87171; }
+
+.persona-field textarea {
+  width: 100%;
+  background: #18181b;
+  border: 1px solid #27272a;
+  border-radius: 10px;
+  padding: 0.6rem 0.7rem;
+  color: #e4e4e7;
+  font: inherit;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  resize: vertical;
+  outline: none;
+  transition: border-color 0.12s ease;
+}
+.persona-field textarea::placeholder { color: #52525b; }
+.persona-field textarea:focus { border-color: rgba(99, 102, 241, 0.5); }
 
 /* ── Voice picker ── */
 .voice-picker {
@@ -411,10 +493,36 @@ code {
   border: 1px solid #1c1c22;
   border-radius: 12px;
   overflow: hidden;
-  max-height: 360px;
+  max-height: 400px;
   display: flex;
   flex-direction: column;
 }
+
+/* "Currently using" banner — sits above the search/filters and answers
+   "what voice did I pick?" without scrolling. Two states: a real
+   selection (with reset link) or auto-pick (default-state hint). */
+.voice-current {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 8px 12px;
+  background: linear-gradient(180deg, rgba(99, 102, 241, 0.08), transparent);
+  border-bottom: 1px solid #1c1c22;
+  font-size: 0.74rem; color: #a1a1aa;
+}
+.voice-current-label {
+  text-transform: uppercase; letter-spacing: 0.05em;
+  font-size: 0.66rem; color: #71717a; font-weight: 500;
+}
+.voice-current-name { color: #f4f4f5; font-size: 0.86rem; font-weight: 600; }
+.voice-current-meta { color: #71717a; }
+.voice-current-auto { color: #71717a; font-style: italic; }
+.voice-current-reset {
+  margin-left: auto;
+  background: none; border: none; cursor: pointer;
+  font: inherit; font-size: 0.72rem; color: #818cf8;
+  text-decoration: underline; padding: 0;
+}
+.voice-current-reset:hover { color: #a5b4fc; }
+
 .voice-picker-head {
   padding: 0.55rem 0.6rem 0.5rem;
   border-bottom: 1px solid #1c1c22;
@@ -811,6 +919,52 @@ code {
 .sd-item select:disabled { opacity: 0.4; cursor: not-allowed; }
 .sd-item select option { background: #18181b; color: #e4e4e7; }
 
+/* Floating mood-preview strip — sits at the bottom of the stage,
+   centered. Mood is preview-only (not a setting), so this lives over
+   the canvas as a viewing control instead of in the form grid. Solid
+   bg per the backdrop-filter-over-WebGL framerate gotcha. */
+.stage-mood-strip {
+  position: absolute;
+  bottom: 14px; left: 50%;
+  transform: translateX(-50%);
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  z-index: 5;
+}
+.stage-mood-hint {
+  font-size: 0.62rem; letter-spacing: 0.06em; text-transform: uppercase;
+  color: #a1a1aa;
+  background: rgba(15, 15, 18, 0.85);
+  padding: 2px 8px; border-radius: 999px;
+  cursor: help;
+}
+.stage-mood-chips {
+  display: inline-flex; gap: 2px; padding: 3px;
+  background: rgba(15, 15, 18, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 999px;
+}
+.stage-mood-chip {
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; border: none; cursor: pointer;
+  color: #a1a1aa; font: inherit;
+  width: 32px; height: 32px;
+  border-radius: 999px;
+  transition: background 0.12s ease, color 0.12s ease, transform 0.08s ease;
+}
+.stage-mood-chip:hover {
+  color: #f4f4f5; background: rgba(255, 255, 255, 0.06);
+  transform: scale(1.08);
+}
+.stage-mood-chip.active {
+  background: linear-gradient(180deg, rgba(99, 102, 241, 0.28), rgba(99, 102, 241, 0.14));
+  color: #fff;
+  box-shadow: inset 0 0 0 1px rgba(99, 102, 241, 0.5);
+}
+.stage-mood-glyph {
+  font-size: 1.15rem;
+  line-height: 1;
+}
+
 .view-toggle {
   position: absolute;
   top: 14px;
@@ -863,26 +1017,76 @@ code {
   color: #fff;
 }
 
+/* Self-view preview during the wizard. Was a 72px circle pinned top-
+   right, which both collided with the view-toggle and was too small
+   to actually verify framing. Now: 16:9 rounded card, bottom-right
+   corner (away from view-toggle / mood-strip / stage-hud), with a
+   pulsing live dot + "you" label so it reads as real-time webcam
+   instead of a thumbnail. */
 .stage-cam-bubble {
   position: absolute;
-  top: 14px;
+  bottom: 14px;
   right: 14px;
-  width: 72px;
-  height: 72px;
-  border-radius: 50%;
+  width: 160px;
+  height: 100px;
+  border-radius: 14px;
   overflow: hidden;
   background: #000;
   box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.08),
-    0 0 0 4px rgba(9, 9, 11, 0.6),
-    0 8px 20px rgba(0, 0, 0, 0.5);
+    inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 1px 2px rgba(0, 0, 0, 0.5),
+    0 8px 24px rgba(0, 0, 0, 0.5),
+    0 0 0 4px rgba(15, 15, 18, 0.6);
   z-index: 3;
+  animation: cam-bubble-in 0.32s cubic-bezier(0.2, 0.8, 0.2, 1);
+  transform-origin: bottom right;
+}
+@keyframes cam-bubble-in {
+  from { opacity: 0; transform: scale(0.92) translateY(8px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
 }
 .stage-cam-bubble video {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  /* Mirror so it feels like a mirror, not a stranger watching. */
   transform: scaleX(-1);
+}
+
+/* "Live" pill in the top-left of the preview — pulsing red dot +
+   tiny label. Telegraphs "this is real-time webcam" instantly. */
+.stage-cam-live {
+  position: absolute;
+  top: 6px; left: 6px;
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 7px 2px 5px;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 999px;
+  font-size: 0.55rem; letter-spacing: 0.08em; text-transform: uppercase;
+  color: #f4f4f5; font-weight: 600;
+  pointer-events: none;
+}
+.stage-cam-live-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: #ef4444;
+  box-shadow: 0 0 6px rgba(239, 68, 68, 0.7);
+  animation: cam-live-pulse 1.6s ease-in-out infinite;
+}
+@keyframes cam-live-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.5; transform: scale(0.85); }
+}
+
+/* "you" label bottom-left — confirms whose face is in the preview
+   (your face). Subtle so it doesn't compete with the live indicator. */
+.stage-cam-label {
+  position: absolute;
+  bottom: 5px; left: 7px;
+  font-size: 0.58rem; letter-spacing: 0.04em;
+  color: rgba(244, 244, 245, 0.85);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+  pointer-events: none;
+  font-weight: 500;
 }
 
 /* ── Form footer (sticky) ── */
@@ -1022,27 +1226,35 @@ code {
 .metric-value.slow { color: #f87171; }
 .metric-value.idle { color: #3f3f46; }
 
+/* Self-view during the call. Mirrors the wizard's .stage-cam-bubble
+   look — same 16:9 rounded card, same multi-layer shadow, same fade-in.
+   The .stage-cam-live + .stage-cam-label overlay rules apply here too
+   (selectors are descendant-only, not bubble-scoped). */
 .session-cam {
   position: absolute;
   bottom: 84px;
   right: 20px;
-  width: 88px;
-  height: 88px;
-  border-radius: 50%;
+  width: 160px;
+  height: 100px;
+  border-radius: 14px;
   overflow: hidden;
   background: #000;
   box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.08),
-    0 0 0 4px rgba(9, 9, 11, 0.6),
-    0 10px 24px rgba(0, 0, 0, 0.5);
+    inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 1px 2px rgba(0, 0, 0, 0.5),
+    0 8px 24px rgba(0, 0, 0, 0.5),
+    0 0 0 4px rgba(15, 15, 18, 0.6);
   z-index: 2;
   transition: transform 0.15s ease-out;
+  animation: cam-bubble-in 0.32s cubic-bezier(0.2, 0.8, 0.2, 1);
+  transform-origin: bottom right;
 }
-.session-cam:hover { transform: scale(1.06); }
+.session-cam:hover { transform: scale(1.04); }
 .session-cam video {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  /* Mirror so it feels like a mirror, not a stranger watching. */
   transform: scaleX(-1);
 }
 
@@ -1275,4 +1487,362 @@ code {
   .stage { grid-template-rows: 260px 1fr; }
   .form-grid { grid-template-columns: 1fr; }
   .form-field.span-2 { grid-column: span 1; }
+}
+
+/* ── Auth UI ─────────────────────────────────────────────────────────── */
+.auth-splash {
+  display: flex; align-items: center; justify-content: center;
+  height: 100vh; color: #71717a; font-size: 0.9rem; letter-spacing: 0.04em;
+}
+
+.login-screen {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 100vh; padding: 24px; background: #0a0a0c;
+}
+.login-card {
+  width: 100%; max-width: 380px;
+  background: #111114; border: 1px solid #1f1f24; border-radius: 12px;
+  padding: 32px 28px; display: flex; flex-direction: column; gap: 14px;
+}
+.login-title { font-size: 1.4rem; font-weight: 600; margin: 0; color: #f4f4f5; }
+.login-sub { color: #a1a1aa; font-size: 0.85rem; margin: 0 0 6px; }
+
+.login-field { display: flex; flex-direction: column; gap: 4px; }
+.login-field span { font-size: 0.78rem; color: #a1a1aa; letter-spacing: 0.02em; }
+.login-field span em { font-style: normal; color: #52525b; }
+.login-field input {
+  background: #1a1a20; border: 1px solid #27272f; border-radius: 8px;
+  padding: 10px 12px; color: #f4f4f5; font-size: 0.9rem; outline: none;
+  transition: border-color 0.15s ease;
+}
+.login-field input:focus { border-color: #6366f1; }
+
+.login-error {
+  background: #2a1414; border: 1px solid #4d1d1d; color: #fca5a5;
+  border-radius: 8px; padding: 8px 12px; font-size: 0.82rem;
+}
+
+.login-submit {
+  background: #6366f1; color: #fff; border: none; border-radius: 8px;
+  padding: 10px 14px; font-size: 0.92rem; font-weight: 500; cursor: pointer;
+  transition: background 0.15s ease; margin-top: 4px;
+}
+.login-submit:hover:not(:disabled) { background: #5258e6; }
+.login-submit:disabled { background: #3b3d6b; cursor: not-allowed; }
+
+.login-swap {
+  text-align: center; font-size: 0.82rem; color: #a1a1aa; margin-top: 6px;
+}
+.link {
+  background: none; border: none; color: #818cf8; cursor: pointer;
+  padding: 0; font: inherit; text-decoration: underline;
+}
+.link:hover { color: #a5b4fc; }
+
+/* Header layout used by both wizard and picker */
+.form-header-row {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  gap: 16px;
+}
+.danger-btn { color: #f87171; }
+.danger-btn:hover { color: #fca5a5; }
+
+/* ── UserMenu (account dropdown) ─────────────────────────────────────── */
+.user-menu { position: relative; }
+
+.user-menu-trigger {
+  display: inline-flex; align-items: center; gap: 10px;
+  background: rgba(24, 24, 28, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 999px; padding: 4px 12px 4px 4px;
+  color: #e4e4e7; font: inherit; font-size: 0.85rem; line-height: 1;
+  cursor: pointer;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+}
+.user-menu-trigger:hover {
+  background: rgba(36, 36, 42, 0.8);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+.user-menu-trigger:active { transform: scale(0.98); }
+.user-menu-trigger.open {
+  background: rgba(36, 36, 42, 0.85);
+  border-color: rgba(99, 102, 241, 0.4);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12);
+}
+
+.user-menu-monogram {
+  width: 28px; height: 28px; border-radius: 999px;
+  background: linear-gradient(135deg, #6366f1, #a855f7);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 0.82rem; font-weight: 600; color: #fff;
+  flex-shrink: 0; letter-spacing: -0.01em;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+.user-menu-username {
+  color: #f4f4f5; max-width: 160px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-weight: 500;
+}
+.user-menu-caret { color: #a1a1aa; transition: transform 0.15s ease; }
+.user-menu-trigger.open .user-menu-caret { transform: rotate(180deg); }
+
+.user-menu-pop {
+  position: absolute; top: calc(100% + 8px); right: 0;
+  min-width: 240px; z-index: 100;
+  background: rgba(20, 20, 24, 0.85);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  padding: 6px;
+  display: flex; flex-direction: column;
+  /* Multi-layer shadow: subtle inset highlight at top, soft drop shadow,
+     and a tighter dark shadow underneath for depth. */
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 1px 2px rgba(0, 0, 0, 0.4),
+    0 8px 24px rgba(0, 0, 0, 0.5),
+    0 16px 48px rgba(0, 0, 0, 0.3);
+  animation: user-menu-fade 0.14s cubic-bezier(0.2, 0.8, 0.2, 1);
+  transform-origin: top right;
+}
+@keyframes user-menu-fade {
+  from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.user-menu-item {
+  display: flex; align-items: center; gap: 10px;
+  background: none; border: none; color: #d4d4d8;
+  font: inherit; font-size: 0.86rem; font-weight: 400;
+  text-align: left; cursor: pointer;
+  padding: 9px 12px; border-radius: 8px;
+  transition: background 0.1s ease, color 0.1s ease;
+}
+.user-menu-item svg { flex-shrink: 0; opacity: 0.7; transition: opacity 0.1s ease; }
+.user-menu-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #f4f4f5;
+}
+.user-menu-item:hover svg { opacity: 1; }
+
+.user-menu-sep {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.06);
+  margin: 4px 6px;
+}
+
+.user-menu-item-danger { color: #f87171; }
+.user-menu-item-danger:hover {
+  background: rgba(239, 68, 68, 0.1);
+  color: #fca5a5;
+}
+
+/* ── AvatarPickerScreen ──────────────────────────────────────────────── */
+.picker-screen {
+  max-width: 720px; margin: 0 auto; padding: 48px 24px;
+}
+.picker-header {
+  display: flex; justify-content: space-between; align-items: flex-end;
+  margin-bottom: 28px;
+}
+.picker-header h1 { font-size: 1.6rem; font-weight: 600; margin: 0; color: #f4f4f5; }
+.picker-header .muted { margin: 4px 0 0; }
+
+.picker-grid {
+  display: grid; gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+}
+
+.picker-card {
+  position: relative;
+  background: #111114; border: 1px solid #1f1f24; border-radius: 12px;
+  padding: 0; display: flex; align-items: stretch;
+  transition: border-color 0.15s ease;
+}
+.picker-card:hover { border-color: #3f3f46; }
+
+.picker-card-main {
+  display: flex; align-items: center; gap: 12px;
+  background: none; border: none; color: inherit;
+  padding: 14px 16px; flex: 1; cursor: pointer; text-align: left;
+}
+
+.picker-avatar-thumb {
+  width: 44px; height: 44px; border-radius: 999px;
+  background: #27272f; display: flex; align-items: center; justify-content: center;
+  font-size: 1.1rem; font-weight: 600; color: #e4e4e7; flex-shrink: 0;
+}
+
+.picker-card-meta { flex: 1; min-width: 0; }
+.picker-card-name { color: #f4f4f5; font-size: 0.95rem; font-weight: 500; }
+.picker-card-sub  { color: #71717a; font-size: 0.78rem; margin-top: 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.picker-card-delete {
+  position: absolute; top: 8px; right: 12px; font-size: 0.72rem; opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.picker-card:hover .picker-card-delete { opacity: 1; }
+
+.picker-new {
+  flex-direction: column; align-items: center; justify-content: center;
+  padding: 24px; cursor: pointer;
+  border-style: dashed; background: transparent; color: #a1a1aa;
+}
+.picker-new:hover { background: #18181b; color: #e4e4e7; }
+.picker-new:disabled { cursor: wait; }
+.picker-new-plus { font-size: 1.6rem; font-weight: 300; margin-bottom: 4px; }
+
+/* ── ConfirmDialog (modal) ───────────────────────────────────────────── */
+.cd-backdrop {
+  position: fixed; inset: 0; z-index: 1000;
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+  background: radial-gradient(
+    ellipse at center,
+    rgba(8, 8, 12, 0.72),
+    rgba(0, 0, 0, 0.86)
+  );
+  backdrop-filter: blur(10px) saturate(140%);
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
+  animation: cd-fade 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@keyframes cd-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.cd-card {
+  position: relative;
+  width: 100%; max-width: 440px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0)) ,
+    rgba(20, 20, 24, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 18px;
+  padding: 28px 26px 22px;
+  display: flex; flex-direction: column;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 1px 2px rgba(0, 0, 0, 0.5),
+    0 24px 60px rgba(0, 0, 0, 0.55),
+    0 4px 14px rgba(0, 0, 0, 0.45);
+  animation: cd-pop 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+  transform-origin: center;
+}
+@keyframes cd-pop {
+  from { opacity: 0; transform: translateY(8px) scale(0.96); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.cd-icon {
+  width: 44px; height: 44px; border-radius: 12px;
+  display: inline-flex; align-items: center; justify-content: center;
+  margin-bottom: 14px;
+  background: rgba(99, 102, 241, 0.12);
+  color: #a5b4fc;
+  border: 1px solid rgba(99, 102, 241, 0.2);
+}
+.cd-card.cd-danger .cd-icon {
+  background: rgba(239, 68, 68, 0.12);
+  color: #fca5a5;
+  border-color: rgba(239, 68, 68, 0.25);
+  box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.06);
+}
+
+.cd-title {
+  font-size: 1.08rem; font-weight: 600;
+  color: #f4f4f5; margin: 0 0 6px;
+  letter-spacing: -0.01em;
+}
+.cd-desc {
+  font-size: 0.86rem; color: #a1a1aa; line-height: 1.5;
+  margin: 0 0 18px;
+}
+
+.cd-field { display: flex; flex-direction: column; gap: 6px; margin: 2px 0 18px; }
+.cd-field > span {
+  font-size: 0.76rem; color: #a1a1aa; letter-spacing: 0.01em;
+}
+.cd-field > span code {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 5px;
+  padding: 1px 6px;
+  color: #f4f4f5;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+}
+.cd-field input {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 9px;
+  padding: 10px 12px;
+  color: #f4f4f5;
+  font-size: 0.9rem;
+  outline: none;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+.cd-field input::placeholder { color: #52525b; }
+.cd-field input:focus {
+  border-color: rgba(248, 113, 113, 0.55);
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.12);
+}
+.cd-card:not(.cd-danger) .cd-field input:focus {
+  border-color: rgba(99, 102, 241, 0.6);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.16);
+}
+
+.cd-actions {
+  display: flex; gap: 10px; justify-content: flex-end;
+  margin-top: 4px;
+}
+.cd-btn {
+  border-radius: 10px; padding: 9px 16px;
+  font: inherit; font-size: 0.88rem; font-weight: 500;
+  cursor: pointer; border: 1px solid transparent;
+  transition: background 0.15s ease, border-color 0.15s ease,
+              color 0.15s ease, transform 0.08s ease, box-shadow 0.15s ease;
+}
+.cd-btn:active:not(:disabled) { transform: scale(0.98); }
+.cd-btn:disabled { cursor: not-allowed; opacity: 0.55; }
+
+.cd-cancel {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.08);
+  color: #d4d4d8;
+}
+.cd-cancel:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: #f4f4f5;
+}
+
+.cd-confirm {
+  background: #6366f1; color: #fff;
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.12) inset,
+              0 4px 14px rgba(99, 102, 241, 0.3);
+}
+.cd-confirm:hover:not(:disabled) { background: #5258e6; }
+
+.cd-confirm-danger {
+  background: #dc2626;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.14) inset,
+              0 4px 14px rgba(220, 38, 38, 0.32);
+}
+.cd-confirm-danger:hover:not(:disabled) { background: #ef4444; }
+.cd-confirm-danger:disabled {
+  background: rgba(220, 38, 38, 0.35);
+  box-shadow: none;
+}
+
+@media (max-width: 480px) {
+  .cd-card { padding: 22px 20px 18px; border-radius: 16px; }
+  .cd-actions { flex-direction: column-reverse; }
+  .cd-actions .cd-btn { width: 100%; }
 }
