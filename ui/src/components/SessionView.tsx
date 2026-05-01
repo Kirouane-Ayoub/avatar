@@ -98,6 +98,7 @@ export function SessionView({ setup, avatar, connection, onExit }: Props) {
 
   const handleCue = useCallback(
     (type: CueType, value: string) => {
+      console.log('[cue]', type, value, 'head?', !!head);
       if (!head) return;
       cueArrivedRef.current = true;
       try {
