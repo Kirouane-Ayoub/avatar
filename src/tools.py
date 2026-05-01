@@ -2,7 +2,7 @@ import logging
 
 from livekit.agents.llm import function_tool
 
-logger = logging.getLogger("lisa-tools")
+logger = logging.getLogger("voice-agent-tools")
 
 
 @function_tool(description="Do a math calculation. Supports +, -, *, /, **, sqrt, etc.")
