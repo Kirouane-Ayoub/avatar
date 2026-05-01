@@ -6,7 +6,7 @@ Architecture:
   a session, they pick which avatar to inhabit; the LiveKit token's
   `participant.identity` is the avatar_id (not the user_id).
 
-  Memory is keyed by avatar_id. So "Lisa remembers your dog" and
+  Memory is keyed by avatar_id. So "Sofia remembers your dog" and
   "Marcus doesn't" are emergent from picking different avatars at
   session start.
 
