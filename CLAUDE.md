@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-Avatar is a real-time speech-to-speech voice agent named **Lisa**, built with LiveKit. The name is a nod to the Hollywood craft of dubbing voice and sound onto a face that's already moving — which is literally what the lipsync + TTS pipeline does. It features a 3D animated avatar with lip sync, vision capabilities (camera input), function calling (tools), and latency metrics. The pipeline: User speaks → STT (Faster Whisper) → LLM (default `mlx-community/Qwen3.6-27B-4bit` running natively via `mlx_lm.server`, OpenAI-compatible) → TTS (Kokoro for word-timestamped lipsync, or Orpheus via `mlx-audio` for higher quality) → Avatar lip sync + audio playback.
+Avatar is a real-time speech-to-speech voice agent stack built with LiveKit. The name is a nod to the Hollywood craft of dubbing voice and sound onto a face that's already moving — which is literally what the lipsync + TTS pipeline does. The default persona ships as **Liva** but is fully configurable per session (name, persona, voice, avatar, tools) via the setup wizard. The system features a 3D animated avatar with lip sync, vision capabilities (camera input), function calling (tools), and latency metrics. The pipeline: User speaks → STT (Faster Whisper) → LLM (default `mlx-community/Qwen3.6-27B-4bit` — a vision-language model — running natively via `mlx_vlm.server`, OpenAI-compatible, accepts both text and image_url content) → TTS (Kokoro for word-timestamped lipsync, or Orpheus via `mlx-audio` for higher quality) → Avatar lip sync + audio playback.
 
 ## Running
 
@@ -33,14 +33,20 @@ python benchmark.py --rounds 5
 MLX servers run natively on the Mac so they can use Metal. Install via `uv`:
 
 ```bash
-# Chat LLM
-uv tool install mlx-lm
+# Chat LLM + ambient affect VLM (both served by mlx-vlm). mlx-vlm is a
+# superset of mlx-lm — same OpenAI-compatible server, also accepts
+# image_url content parts. mlx-vlm's pyproject is missing torch/torchvision
+# (Qwen2VL's video preprocessor needs them) plus the FastAPI runtime deps.
+uv tool install --with 'uvicorn[standard]' --with fastapi \
+  --with python-multipart --with torch --with torchvision mlx-vlm
 
 # Orpheus TTS — mlx-audio's pyproject is missing several runtime deps, so
 # inject them explicitly. WITHOUT --with the server crashes on import.
 uv tool install --with 'uvicorn[standard]' --with fastapi \
   --with python-multipart --with webrtcvad-wheels mlx-audio
 ```
+
+`mlx-lm` is no longer needed — `run.sh:start_llm` now invokes `mlx_vlm.server`. You can `uv tool uninstall mlx-lm` if you have it.
 
 `run.sh:start_orpheus` checks for `mlx_audio.server` on PATH and prints this exact command if it's missing.
 
@@ -137,13 +143,14 @@ All config via `.env`. Required: `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_
 - **`backdrop-filter: blur(...)` over the WebGL canvas** (e.g. on overlay glass pills) tanks framerate of the avatar idle, because every canvas repaint forces re-blur of the overlay region. Use solid-ish opaque backgrounds for overlays that float over the TalkingHead canvas, or restrict blur to elements that don't overlap the canvas.
 - **Vite + importmap**: TalkingHead, `lipsync-*` modules, and `three` are loaded from the browser's importmap (in `ui/index.html`) and exposed on `window`. They're externalized in `vite.config.ts` (`external: [/^three($|\/)/, 'talkinghead', /^lipsync-/]`) so the bundler doesn't try to resolve them. New CDN-loaded module → add to externals + importmap + `Window` declaration.
 - **mlx-audio's pyproject is missing runtime deps** (`uvicorn`, `fastapi`, `python-multipart`, `webrtcvad`). A bare `uv tool install mlx-audio` produces a `mlx_audio.server` binary that crashes on import. Use the `--with` form documented in the Host-side dependencies section above.
-- **Orpheus streaming has SNAC chunk-boundary artifacts** ("echo" on words straddling a chunk seam) because mlx-audio's per-chunk decode isn't a sliding window. `OrpheusConfig.streaming_interval` defaults to `2.0` s so most short Lisa replies fit in one chunk → no boundary → no echo. Lowering it to `0.5` s improves TTFB but reintroduces the artifact for any reply >2 s.
+- **Orpheus streaming has SNAC chunk-boundary artifacts** ("echo" on words straddling a chunk seam) because mlx-audio's per-chunk decode isn't a sliding window. `OrpheusConfig.streaming_interval` defaults to `2.0` s so most short replies fit in one chunk → no boundary → no echo. Lowering it to `0.5` s improves TTFB but reintroduces the artifact for any reply >2 s.
 - **Orpheus model loads lazily on first request** — the very first TTS call after starting `mlx_audio.server` triggers a download (if not cached) + an in-RAM load that blocks the FastAPI worker. The agent typically times out and the session ends. Pre-warm with a one-line curl after launch (`POST /v1/audio/speech` with any short text) before pointing the agent at it.
 - **Docker on macOS Colima is starved by default** (4 CPU / 8 GB on M4 Pro). For Orpheus + Kokoro + Whisper to run smoothly, bump to at least `colima start --cpu 8 --memory 24`. Settings persist in `~/.colima/default/colima.yaml`.
 - **`avatar-network` is pinned by name** in `docker-compose.yml` (`networks: avatar-network: name: avatar-network`) so Docker reuses the same network across `up` cycles; without this, profile toggles or interrupted starts left containers holding references to a dead network UUID and caused recurring `failed to set up container networking: network ... not found` errors.
 - **Dockerfile is multi-stage** (`node:20-slim AS ui-builder` → `python:3.11-slim`) so the React bundle is rebuilt inside the image from current source rather than copied from a possibly-stale host `ui/dist/`. Before this, host `ui/dist/` was baked in via `COPY ui/ ui/` and silently drifted behind `src/`.
 - **Use `docker-compose` (hyphen, v1)**, never `docker compose` (space, v2 plugin) — the v2 plugin form fails with `unknown flag` on the user's machine. Same for any docs/scripts you edit.
 - **Use `uv` for Python package management** (`uv tool install` / `uv add` / `uv pip install`) — never `pip` / `pipx` / `python -m venv`.
+- **mlx-vlm uses non-OpenAI usage field names** (`input_tokens`/`output_tokens` instead of `prompt_tokens`/`completion_tokens`) which crashes strict OpenAI clients like livekit-agents (`pydantic ValidationError: completion_tokens / prompt_tokens — Input should be a valid integer [input_value=None]` → `APIConnectionError`). Until upstream fixes it, we patch `OpenAIUsage` in `~/.local/share/uv/tools/mlx-vlm/lib/python*/site-packages/mlx_vlm/server.py`: rename the fields to OpenAI-spec names with `validation_alias=AliasChoices(...)` for backwards-compat with internal callers + `populate_by_name=True`. The patch survives until the next `uv tool upgrade mlx-vlm` / `--force` reinstall, after which it must be reapplied. The marker comment in the patched class begins with `LIVA PATCH:` for easy grep / re-detection.
 
 ## Code Style
 
