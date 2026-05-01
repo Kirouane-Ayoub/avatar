@@ -25,12 +25,24 @@ from config import Config
 
 
 class PatientLLM(openai.LLM):
-    """openai.LLM with a wider per-call APIConnectOptions.timeout."""
+    """openai.LLM with a wider per-call APIConnectOptions.timeout.
+
+    Bug we hit: `kwargs.setdefault("conn_options", ...)` is a no-op
+    when livekit-agents passes its own `conn_options=` explicitly
+    (which it does — every call). So the wider timeout never applied,
+    and the chat call still timed out at the default 10 s when the
+    LLM server was queued (e.g. when Mem0 fact extraction was hitting
+    the same model). Force-override instead.
+    """
 
     _PATIENT_CONN = APIConnectOptions(max_retry=3, retry_interval=2.0, timeout=60.0)
 
     def chat(self, *args, **kwargs):
-        kwargs.setdefault("conn_options", self._PATIENT_CONN)
+        # Hard-override: ALWAYS use our wider conn_options, even if
+        # livekit passed its own. The 10 s default is too tight for
+        # any serial-server backend (mlx-vlm, mlx-lm, single-instance
+        # Ollama) under any load.
+        kwargs["conn_options"] = self._PATIENT_CONN
         return super().chat(*args, **kwargs)
 
 
