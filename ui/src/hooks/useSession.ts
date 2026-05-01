@@ -16,7 +16,7 @@ export interface LipsyncData {
 
 export type CueType = 'mood' | 'gesture' | 'pose';
 
-export type MetricKey = 'stt' | 'llm' | 'tts' | 'e2e';
+export type MetricKey = 'stt' | 'llm' | 'tts' | 'e2e' | 'memR' | 'memW';
 
 export interface TranscriptSegment {
   id: string;
@@ -225,6 +225,14 @@ export function useSession(
           case 'gesture':
           case 'pose':
             if (d.value) handlersRef.current.onCue?.(d.type, d.value);
+            break;
+          case 'memory':
+            // Memory metric: { type:"memory", op:"read"|"write", ms:N }
+            if (typeof d.ms === 'number') {
+              const slot: MetricKey | null =
+                d.op === 'read' ? 'memR' : d.op === 'write' ? 'memW' : null;
+              if (slot) setMetrics((m) => ({ ...m, [slot]: d.ms }));
+            }
             break;
           case 'pipeline':
             setMetrics((m) => ({
