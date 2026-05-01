@@ -248,6 +248,14 @@ export function SessionView({ setup, avatar, connection, onExit }: Props) {
         {session.cameraPreview && (
           <div className="session-cam">
             <video ref={camVideoRef} autoPlay muted playsInline />
+            {/* Same overlay treatment as the wizard preview — pulsing
+                "live" pill + "you" label so the user can read it as
+                their own webcam feed at a glance during the call. */}
+            <span className="stage-cam-live" aria-hidden>
+              <span className="stage-cam-live-dot" />
+              <span className="stage-cam-live-text">live</span>
+            </span>
+            <span className="stage-cam-label">you</span>
           </div>
         )}
 
