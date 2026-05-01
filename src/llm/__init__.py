@@ -13,4 +13,5 @@ from .prompt import (  # noqa: F401
     ORPHEUS_EMOTION_TAGS,
     build_system_prompt,
     memory_block,
+    recent_block,
 )

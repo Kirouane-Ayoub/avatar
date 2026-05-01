@@ -13,6 +13,7 @@ is package-private — fair game to refactor without notice to callers.
 from .db import (  # noqa: F401
     Avatar,
     Db,
+    Transcript,
     User,
     get_db,
     init_db,
