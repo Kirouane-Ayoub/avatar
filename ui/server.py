@@ -1,5 +1,6 @@
 import http.client
 import json
+import logging
 import os
 import sys
 import threading
@@ -9,17 +10,31 @@ import urllib.request
 import uuid
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Optional
 from urllib.parse import parse_qs, urlparse
 
 from dotenv import load_dotenv
 from livekit.api import AccessToken, VideoGrants
 
-# Import the shared voice catalog from src/.
+# Import shared modules from src/.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from cues import MOODS  # noqa: E402
-from voices import KOKORO_VOICES, ORPHEUS_VOICES, backend_for  # noqa: E402
+from tts import KOKORO_VOICES, ORPHEUS_VOICES, backend_for  # noqa: E402
 
 load_dotenv()
+
+# Auth + DB. Imported AFTER load_dotenv so config.py sees the env vars.
+import auth as auth_lib  # noqa: E402
+from auth import init_db  # noqa: E402
+from config import Config as _Config  # noqa: E402
+
+logger = logging.getLogger("token-server")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+
+# Module-level singletons shared by every request handler thread. The DB
+# pool is thread-safe (psycopg_pool.ConnectionPool); Config is frozen.
+_CONFIG = _Config.from_env()
+_DB = init_db(_CONFIG)
 
 LIVEKIT_URL = os.environ["LIVEKIT_URL"]
 LIVEKIT_EXTERNAL_URL = os.getenv("LIVEKIT_EXTERNAL_URL", LIVEKIT_URL)
@@ -33,7 +48,7 @@ DIST_DIR = UI_DIR / "dist"
 # React bundle (ui/dist/). Avatar GLBs live in ui/avatar-zoo/.
 _SOURCE_ROUTES = ("/avatar-zoo/",)
 
-ALLOWED_TOOLS = {"calculate", "set_reminder", "online_search", "internal_search"}
+ALLOWED_TOOLS = {"set_reminder", "online_search", "internal_search"}
 ALLOWED_MOODS = frozenset(MOODS)
 ALLOWED_LANGUAGES = {"en", "ja"}
 ALLOWED_BODIES = {"F", "M"}
@@ -143,6 +158,75 @@ class Handler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(json.dumps(payload).encode())
 
+    # ── Auth helpers ─────────────────────────────────────────────────────
+    def _read_json_body(self) -> dict:
+        """Read+parse a JSON body, returning {} on missing/invalid.
+        Sends a 400 + raises ValueError if the body was malformed JSON
+        (caller should `return` after catching)."""
+        length = int(self.headers.get("Content-Length", "0") or 0)
+        if not length:
+            return {}
+        raw = self.rfile.read(length)
+        try:
+            data = json.loads(raw)
+            return data if isinstance(data, dict) else {}
+        except json.JSONDecodeError:
+            self._send_json(400, {"error": "invalid JSON"})
+            raise ValueError("bad json")
+
+    def _bearer_user_id(self) -> str | None:
+        """Extract user_id from Authorization: Bearer <session_jwt>.
+        Returns None and sends 401 on missing / invalid / expired token."""
+        auth_header = self.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
+            self._send_json(401, {"error": "missing bearer token"})
+            return None
+        token = auth_header[len("Bearer "):].strip()
+        try:
+            return auth_lib.user_id_from_token(token, _CONFIG)
+        except auth_lib.InvalidToken as e:
+            self._send_json(401, {"error": str(e)})
+            return None
+
+    def _user_to_json(self, user) -> dict:
+        """Serialize a User dataclass for the wire. Excludes any
+        sensitive fields (password_hash never makes it past auth.py).
+        Persona/voice/avatar/mood/tools moved to the avatars table —
+        the user record is auth-only now."""
+        return {
+            "id": user.id,
+            "username": user.username,
+            "display_name": user.display_name,
+        }
+
+    def _avatar_to_json(self, avatar) -> dict:
+        """Serialize an Avatar dataclass for the wire."""
+        return {
+            "id": avatar.id,
+            "user_id": avatar.user_id,
+            "name": avatar.name,
+            "persona": avatar.persona,
+            "voice": avatar.voice,
+            "avatar_key": avatar.avatar_key,
+            "tools": avatar.tools,
+            "last_used_at": avatar.last_used_at.isoformat() if avatar.last_used_at else None,
+        }
+
+    def _own_avatar_or_404(self, user_id: str, avatar_id: str):
+        """Fetch the avatar AND verify the calling user owns it.
+        Returns the Avatar on success, None after sending 404 / 403.
+        Folds two checks into one to keep callers tidy."""
+        avatar = _DB.get_avatar(avatar_id)
+        if avatar is None:
+            self._send_json(404, {"error": "avatar not found"})
+            return None
+        if avatar.user_id != user_id:
+            # 404 not 403 — don't leak that the avatar exists under
+            # someone else.
+            self._send_json(404, {"error": "avatar not found"})
+            return None
+        return avatar
+
     def _handle_voice_sample(self, qs: dict):
         voice = (qs.get("voice", [""])[0] or "").strip()
         text = (qs.get("text", [""])[0] or "").strip()[:MAX_SAMPLE_TEXT]
@@ -235,31 +319,260 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urlparse(self.path)
-        if parsed.path != "/api/token":
-            self.send_error(404)
-            return
+        if parsed.path == "/api/signup":
+            return self._handle_signup()
+        if parsed.path == "/api/login":
+            return self._handle_login()
+        if parsed.path == "/api/logout":
+            # Stateless JWT — nothing to invalidate server-side. The
+            # client clears localStorage. Returning 200 keeps the API
+            # symmetric and lets us add a server-side blocklist later
+            # without changing clients.
+            return self._send_json(200, {"ok": True})
+        if parsed.path == "/api/token":
+            return self._handle_token()
+        if parsed.path == "/api/avatars":
+            return self._handle_create_avatar()
+        self.send_error(404)
 
-        length = int(self.headers.get("Content-Length", "0") or 0)
+    def do_PATCH(self):
+        parsed = urlparse(self.path)
+        avatar_id = self._extract_avatar_id(parsed.path)
+        if avatar_id is not None:
+            return self._handle_update_avatar(avatar_id)
+        self.send_error(404)
+
+    def do_DELETE(self):
+        parsed = urlparse(self.path)
+        if parsed.path == "/api/me":
+            return self._handle_delete_me()
+        avatar_id = self._extract_avatar_id(parsed.path)
+        if avatar_id is not None:
+            return self._handle_delete_avatar(avatar_id)
+        self.send_error(404)
+
+    @staticmethod
+    def _extract_avatar_id(path: str) -> Optional[str]:
+        """`/api/avatars/<id>` → <id>; otherwise None. Used by GET /
+        PATCH / DELETE on a single avatar."""
+        prefix = "/api/avatars/"
+        if not path.startswith(prefix):
+            return None
+        avatar_id = path[len(prefix):].strip("/")
+        return avatar_id or None
+
+    # ── DELETE /api/me — wipe account + every avatar + their memories ──
+    def _handle_delete_me(self):
+        user_id = self._bearer_user_id()
+        if user_id is None:
+            return  # 401 already sent
+
+        # Memory is keyed by avatar_id (not user_id), so we have to
+        # enumerate this user's avatars and forget each one's memories
+        # BEFORE deleting the user. The user delete CASCADEs to the
+        # avatar rows via the FK; the memory rows are owned by Mem0 in
+        # its own table and need explicit cleanup or they're orphaned.
+        from memory import build_provider  # noqa: E402 — lazy keeps boot light
+        import asyncio
         try:
-            body = json.loads(self.rfile.read(length)) if length else {}
-            if not isinstance(body, dict):
-                body = {}
-        except json.JSONDecodeError:
-            self._send_json(400, {"error": "invalid JSON"})
-            return
+            avatars = _DB.list_avatars(user_id)
+            if avatars:
+                provider = build_provider(_CONFIG)
+                async def _wipe_all():
+                    for av in avatars:
+                        await provider.forget(av.id)
+                asyncio.run(_wipe_all())
+        except Exception:
+            logger.exception("memory wipe failed for user_id=%s — proceeding with user delete", user_id)
+        deleted = _DB.delete_user(user_id)
+        logger.info(
+            "delete account: user_id=%s avatars_wiped=%d row_deleted=%s",
+            user_id, len(avatars) if 'avatars' in locals() else 0, deleted,
+        )
+        self._send_json(200, {"ok": True, "deleted": deleted})
 
+    # ── /api/signup ─────────────────────────────────────────────────────
+    def _handle_signup(self):
+        try:
+            body = self._read_json_body()
+        except ValueError:
+            return
+        username = body.get("username", "")
+        password = body.get("password", "")
+        display_name = body.get("display_name") or body.get("displayName")
+        try:
+            user, token = auth_lib.signup(
+                _DB, _CONFIG,
+                username=username, password=password, display_name=display_name,
+            )
+        except auth_lib.UsernameTaken:
+            return self._send_json(409, {"error": "username already taken"})
+        except (auth_lib.WeakPassword, auth_lib.AuthError) as e:
+            return self._send_json(400, {"error": str(e)})
+        except Exception as e:
+            logger.exception("signup failed")
+            return self._send_json(500, {"error": f"signup failed: {e}"})
+        self._send_json(201, {"user": self._user_to_json(user), "session_token": token})
+
+    # ── /api/login ──────────────────────────────────────────────────────
+    def _handle_login(self):
+        try:
+            body = self._read_json_body()
+        except ValueError:
+            return
+        try:
+            user, token = auth_lib.login(
+                _DB, _CONFIG,
+                username=body.get("username", ""), password=body.get("password", ""),
+            )
+        except auth_lib.InvalidCredentials:
+            return self._send_json(401, {"error": "invalid username or password"})
+        except Exception as e:
+            logger.exception("login failed")
+            return self._send_json(500, {"error": f"login failed: {e}"})
+        self._send_json(200, {"user": self._user_to_json(user), "session_token": token})
+
+    # ── /api/token (LiveKit room access — requires session JWT + avatar_id) ─
+    def _handle_token(self):
+        # Verify the session JWT first; reject unauthorized requests
+        # before doing any other work (and before consuming the body).
+        user_id = self._bearer_user_id()
+        if user_id is None:
+            return  # 401 already sent
+        user = _DB.get_user_by_id(user_id)
+        if user is None:
+            return self._send_json(401, {"error": "user no longer exists"})
+
+        try:
+            body = self._read_json_body()
+        except ValueError:
+            return
+        avatar_id = (body.get("avatar_id") or "").strip()
+        if not avatar_id:
+            return self._send_json(400, {"error": "avatar_id required"})
+
+        avatar = self._own_avatar_or_404(user_id, avatar_id)
+        if avatar is None:
+            return  # 404 already sent
+
+        # Persist wizard choices that came along (the user may have
+        # tweaked persona/voice/avatar_key/tools right before starting).
+        # Mood is intentionally NOT saved — it's a transient preview.
         cfg = sanitize(body)
+        try:
+            _DB.update_avatar(
+                avatar.id,
+                name=cfg.get("name") or None,
+                persona=cfg.get("persona") or None,
+                voice=cfg.get("voice"),
+                avatar_key=cfg.get("avatar") or None,
+                tools=cfg.get("tools"),
+                touch_last_used=True,  # bumps last_used_at for "recently chatted" sort
+            )
+        except Exception:
+            logger.exception("avatar profile save failed for avatar_id=%s", avatar.id)
+
         room_name = f"session-{uuid.uuid4().hex[:8]}"
+        # Identity = avatar_id. Memory keys by this; agent's identity
+        # layer looks up the Avatar row by it. Wizard cfg in metadata
+        # for body / mood / language hints the agent uses for voice
+        # defaults and initial preview state.
         token = (
             AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET)
-            .with_identity("user")
+            .with_identity(avatar.id)
             .with_metadata(json.dumps(cfg))
             .with_grants(VideoGrants(room_join=True, room=room_name))
             .to_jwt()
         )
         self._send_json(
-            200, {"token": token, "url": LIVEKIT_EXTERNAL_URL, "config": cfg}
+            200,
+            {
+                "token": token, "url": LIVEKIT_EXTERNAL_URL,
+                "config": cfg,
+                "user": self._user_to_json(user),
+                "avatar": self._avatar_to_json(avatar),
+            },
         )
+
+    # ── POST /api/avatars — create a new avatar ─────────────────────────
+    def _handle_create_avatar(self):
+        user_id = self._bearer_user_id()
+        if user_id is None:
+            return
+        try:
+            body = self._read_json_body()
+        except ValueError:
+            return
+        name = (body.get("name") or "").strip()
+        if not name:
+            return self._send_json(400, {"error": "name required"})
+        # Apply the same value sanitization as /api/token so we don't
+        # ever store an unknown voice or out-of-range field.
+        cfg = sanitize(body)
+        try:
+            avatar = _DB.create_avatar(
+                user_id=user_id,
+                name=name,
+                persona=cfg.get("persona") or None,
+                voice=cfg.get("voice"),
+                avatar_key=cfg.get("avatar") or None,
+                tools=cfg.get("tools") or None,
+            )
+        except Exception as e:
+            logger.exception("create_avatar failed")
+            return self._send_json(500, {"error": f"create failed: {e}"})
+        self._send_json(201, {"avatar": self._avatar_to_json(avatar)})
+
+    # ── PATCH /api/avatars/:id — partial update ─────────────────────────
+    def _handle_update_avatar(self, avatar_id: str):
+        user_id = self._bearer_user_id()
+        if user_id is None:
+            return
+        avatar = self._own_avatar_or_404(user_id, avatar_id)
+        if avatar is None:
+            return
+        try:
+            body = self._read_json_body()
+        except ValueError:
+            return
+        cfg = sanitize(body)
+        # Only fields actually present in the body are forwarded so the
+        # caller can patch one field at a time.
+        kwargs: dict = {}
+        if "name" in body:
+            kwargs["name"] = cfg.get("name") or avatar.name
+        if "persona" in body:
+            kwargs["persona"] = cfg.get("persona") or None
+        if "voice" in body:
+            kwargs["voice"] = cfg.get("voice")
+        if "avatar" in body:
+            kwargs["avatar_key"] = cfg.get("avatar") or None
+        if "tools" in body:
+            kwargs["tools"] = cfg.get("tools")
+        updated = _DB.update_avatar(avatar.id, **kwargs)
+        self._send_json(200, {"avatar": self._avatar_to_json(updated) if updated else None})
+
+    # ── DELETE /api/avatars/:id — wipe avatar + its memories ────────────
+    def _handle_delete_avatar(self, avatar_id: str):
+        user_id = self._bearer_user_id()
+        if user_id is None:
+            return
+        avatar = self._own_avatar_or_404(user_id, avatar_id)
+        if avatar is None:
+            return
+        # Wipe Mem0 memories for this avatar BEFORE deleting the row so
+        # they don't end up orphaned. Best-effort; a memory failure
+        # shouldn't block the user from removing the avatar.
+        from memory import build_provider  # noqa: E402
+        import asyncio
+        try:
+            provider = build_provider(_CONFIG)
+            asyncio.run(provider.forget(avatar.id))
+        except Exception:
+            logger.exception("memory wipe failed for avatar_id=%s — proceeding with delete", avatar.id)
+        deleted = _DB.delete_avatar(avatar.id)
+        logger.info("delete avatar: avatar_id=%s row_deleted=%s", avatar.id, deleted)
+        self._send_json(200, {"ok": True, "deleted": deleted})
 
     def do_GET(self):
         parsed = urlparse(self.path)
@@ -267,6 +580,33 @@ class Handler(SimpleHTTPRequestHandler):
             # Legacy GET no longer supported — clients must POST the full config.
             self._send_json(405, {"error": "use POST /api/token with a JSON body"})
             return
+        if parsed.path == "/api/me":
+            # Return the currently-logged-in user's profile. UI hits this
+            # on app boot to decide whether to show login or the avatar
+            # picker.
+            user_id = self._bearer_user_id()
+            if user_id is None:
+                return  # 401 already sent
+            user = _DB.get_user_by_id(user_id)
+            if user is None:
+                return self._send_json(401, {"error": "user no longer exists"})
+            return self._send_json(200, {"user": self._user_to_json(user)})
+        if parsed.path == "/api/avatars":
+            # List the calling user's avatars (most-recently-chatted first).
+            user_id = self._bearer_user_id()
+            if user_id is None:
+                return
+            avatars = _DB.list_avatars(user_id)
+            return self._send_json(200, {"avatars": [self._avatar_to_json(a) for a in avatars]})
+        avatar_id = self._extract_avatar_id(parsed.path)
+        if avatar_id is not None:
+            user_id = self._bearer_user_id()
+            if user_id is None:
+                return
+            avatar = self._own_avatar_or_404(user_id, avatar_id)
+            if avatar is None:
+                return
+            return self._send_json(200, {"avatar": self._avatar_to_json(avatar)})
         if parsed.path == "/api/voices":
             # Kokoro voices are intersected with what the running Kokoro image
             # actually has; Orpheus voices are exposed unconditionally — the
