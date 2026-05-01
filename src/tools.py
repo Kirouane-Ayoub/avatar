@@ -5,19 +5,6 @@ from livekit.agents.llm import function_tool
 logger = logging.getLogger("voice-agent-tools")
 
 
-@function_tool(description="Do a math calculation. Supports +, -, *, /, **, sqrt, etc.")
-async def calculate(expression: str) -> str:
-    """Evaluate a math expression safely."""
-    allowed = set("0123456789+-*/.() ")
-    if not all(c in allowed for c in expression):
-        return "I can only calculate simple math expressions"
-    try:
-        result = eval(expression, {"__builtins__": {}}, {})
-        return f"{expression} = {result}"
-    except Exception:
-        return f"Could not calculate: {expression}"
-
-
 @function_tool(
     description="Set a reminder or timer with a message. Duration in seconds."
 )
@@ -51,11 +38,6 @@ async def internal_search(query: str) -> str:
 # Catalog drives both the setup-wizard checkboxes (UI) and the agent's tool
 # filter. Keep ids in sync with TOOL_CATALOG in ui/index.html.
 TOOL_CATALOG = {
-    "calculate": {
-        "tool": calculate,
-        "label": "Calculator",
-        "description": "Basic math",
-    },
     "set_reminder": {
         "tool": set_reminder,
         "label": "Reminders",
