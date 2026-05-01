@@ -29,7 +29,9 @@ RUN pip install --no-cache-dir \
     "soundfile" \
     "aiohttp" \
     "mem0ai" \
-    "psycopg[binary,pool]"
+    "psycopg[binary,pool]" \
+    "bcrypt" \
+    "pyjwt"
 
 # 3. Copy source code (only this rebuilds on code changes — fast)
 COPY src/ src/
