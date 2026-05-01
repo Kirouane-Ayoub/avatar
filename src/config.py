@@ -100,10 +100,30 @@ class Config:
     mem0_embedder_api_key: Optional[str] = None
     mem0_embedder_dims: Optional[int] = None
 
-    # ── (room for auth/login config — JWT_SECRET, OAUTH_*, DB_URL) ──────
-    # Add new sections here as features land. Single migration path:
-    # 1. add field with default, 2. read in from_env(), 3. consume by
-    # passing `config` to whatever module needs it.
+    # ── Auth / sessions ─────────────────────────────────────────────────
+    # JWT_SECRET signs the session token issued at /api/login. Must be set
+    # in production — generate with `python -c "import secrets; print(secrets.token_urlsafe(64))"`.
+    # Don't commit to .env.example with a real value; commit only the
+    # placeholder. Same secret must be available to BOTH the token server
+    # (issues tokens) and the agent (verifies tokens) — both run in the
+    # same container so .env covers both.
+    jwt_secret: str = ""
+    # Session JWT lifetime. Seven days is a sensible default for a
+    # voice-friend app — short enough to limit blast radius, long enough
+    # that returning users don't re-auth on every visit.
+    session_token_ttl_days: int = 7
+
+    # ── App database (users + future profile / settings tables) ─────────
+    # Reuses the postgres-memory container by default — same host/creds,
+    # different (or same) database. We keep the users table in the same
+    # `mem0` DB alongside `lisa_memories` to avoid spinning up a second
+    # postgres just for auth. If you ever split, point app_pg_* at a
+    # different host.
+    app_pg_host: str = "postgres-memory"
+    app_pg_port: int = 5432
+    app_pg_user: str = "mem0"
+    app_pg_password: str = "mem0"
+    app_pg_dbname: str = "mem0"
 
     # ────────────────────────────────────────────────────────────────────
     @classmethod
@@ -166,6 +186,15 @@ class Config:
             mem0_embedder_base_url=os.getenv("MEM0_EMBEDDER_BASE_URL"),
             mem0_embedder_api_key=os.getenv("MEM0_EMBEDDER_API_KEY"),
             mem0_embedder_dims=(int(embedder_dims_env) if embedder_dims_env else None),
+            # Auth
+            jwt_secret=os.environ["JWT_SECRET"],
+            session_token_ttl_days=int(os.getenv("SESSION_TOKEN_TTL_DAYS", "7")),
+            # App DB (default: reuse postgres-memory)
+            app_pg_host=os.getenv("APP_PG_HOST", "postgres-memory"),
+            app_pg_port=int(os.getenv("APP_PG_PORT", "5432")),
+            app_pg_user=os.getenv("APP_PG_USER", "mem0"),
+            app_pg_password=os.getenv("APP_PG_PASSWORD", "mem0"),
+            app_pg_dbname=os.getenv("APP_PG_DBNAME", "mem0"),
         )
 
     # Convenience helpers ────────────────────────────────────────────────
