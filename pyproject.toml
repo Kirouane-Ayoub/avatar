@@ -11,6 +11,18 @@ dependencies = [
     "numpy",
     "soundfile",
     "aiohttp",
+    # Persistent per-user memory. Embedded SDK (no separate REST server).
+    # Talks to postgres-memory + OpenAI-compatible endpoints for both
+    # fact-extraction LLM and embeddings (Ollama on the host by default).
+    # NB: NO sentence-transformers / torch deps — embeddings happen out-
+    # of-process at Ollama, so the agent container stays lean (~420 MB
+    # of torch wheels NOT downloaded).
+    "mem0ai",
+    # Mem0's pgvector adapter imports psycopg_pool.ConnectionPool — that
+    # comes from the [pool] extra. The [binary] extra gets the C bindings.
+    # Both required; without [pool] Mem0 silently falls back to NullProvider
+    # at startup with an ImportError logged.
+    "psycopg[binary,pool]",
 ]
 
 [tool.setuptools]
