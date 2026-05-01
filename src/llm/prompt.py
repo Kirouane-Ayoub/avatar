@@ -16,6 +16,7 @@ and is imported here.
 from __future__ import annotations
 
 from cues import GESTURES, MOODS, POSES
+from tools import TOOL_CATALOG
 
 from auth import UserIdentity
 
@@ -94,6 +95,75 @@ def _language_block(language: str) -> str:
     ).replace("{name}", name)
 
 
+def recent_block(turns: list) -> str:
+    """Format the last N raw transcript turns as a system-prompt section.
+
+    `turns` is a chronological list of objects with `.role` and `.text`
+    attributes (auth.Transcript). This is short-term memory — the
+    verbatim "what we just said" — distinct from `memory_block()` which
+    is Mem0's distilled facts.
+
+    Returns "" when there are no prior turns, so the caller can string-
+    concat without conditionals. Capped at the last 20 lines defensively
+    in case more get passed in.
+    """
+    if not turns:
+        return ""
+    lines = []
+    for t in turns[-20:]:
+        speaker = "Friend" if t.role == "user" else "You"
+        text = (t.text or "").strip()
+        if not text:
+            continue
+        lines.append(f"{speaker}: {text}")
+    if not lines:
+        return ""
+    return (
+        "\n\nRECENT CONVERSATION (the last things you and your friend said, "
+        "from a previous session — pick up naturally if it makes sense, but "
+        "don't force a reference to it):\n"
+        + "\n".join(lines)
+    )
+
+
+def _tools_block(tool_ids: list[str]) -> str:
+    """Format the loaded tools as a dedicated system-prompt section.
+
+    Returns "" when no tools are loaded — telling the LLM about tools
+    it doesn't have causes hallucinated tool calls (the LLM happily
+    promises to "search the web" then answers from its own knowledge,
+    which is worse than not mentioning the capability at all).
+
+    Why a dedicated section, imperative voice, explicit examples: an
+    earlier inline version ("use tools quietly when needed") was too
+    soft — the model resolved the tension between "be a casual friend"
+    and "use tools" by talking ABOUT tool use ("hold on, let me search")
+    and then answering from memory anyway. The imperative + anti-patterns
+    push it to actually emit the function call.
+
+    Each tool's catalog `description` is reused verbatim so the wording
+    stays in lockstep with `tools.py` — change the description there
+    and the prompt updates automatically.
+    """
+    parts: list[str] = []
+    for tid in tool_ids:
+        entry = TOOL_CATALOG.get(tid)
+        if not entry:
+            continue
+        parts.append(f"  - `{tid}` — {entry['description']}")
+    if not parts:
+        return ""
+    return (
+        "\n\nTOOLS YOU HAVE:\n"
+        + "\n".join(parts)
+        + "\nWhen the user's request matches one of these, CALL THE TOOL — "
+        "actually emit the function call. NEVER promise to search / look "
+        "up / fetch something and then answer from memory; that's a lie. "
+        "Don't preface the call with \"hold on, let me check\" — just call "
+        "it silently, then react to the result like you already knew."
+    )
+
+
 def memory_block(recalled: str) -> str:
     """Format recalled memory as a system-prompt section.
 
@@ -117,13 +187,20 @@ def build_system_prompt(
     backend: str,
     language: str,
     recalled_memory: str = "",
+    recent_turns: list | None = None,
+    tool_ids: list[str] | None = None,
 ) -> str:
     """Assemble the full system prompt for a session.
 
-    Inputs are intentionally narrow: identity (who Lisa is talking to and
-    as), backend ("kokoro"|"orpheus" — selects whether to mention vocal
-    emotion tags), language (locks reply language to match TTS), and
-    recalled_memory (free-form text from MemoryProvider.recall, may be "").
+    Inputs are intentionally narrow: identity (who the avatar is and who
+    they're talking to), backend ("kokoro"|"orpheus" — selects whether to
+    mention vocal emotion tags), language (locks reply language to match
+    TTS), recalled_memory (free-form text from MemoryProvider.recall,
+    Mem0's distilled facts — may be ""), recent_turns (chronological
+    list of auth.Transcript objects from the previous session — verbatim
+    short-term recall, may be None or []), and tool_ids (the actual
+    tool ids loaded for this session — only those get mentioned in the
+    prompt, so the LLM never thinks it has a tool that isn't wired).
     """
     return (
         f"You are {identity.name}.\n\n"
@@ -139,9 +216,9 @@ def build_system_prompt(
         "not as a script. Use contractions (I'm, you're, that's, gonna, kinda). "
         "NEVER repeat or echo the user's words. "
         "Keep replies to 1-2 short sentences — like real spoken conversation. "
-        "When you receive a camera frame, only mention it if asked. "
-        "Use tools quietly when needed (set reminders, online_search for public/web "
-        "info, internal_search for private docs) — don't announce that you're using a tool.\n\n"
+        "When you receive a camera frame, only mention it if asked."
+        + _tools_block(tool_ids or [])
+        + "\n\n"
         "You MUST express emotion and body language by ALWAYS prepending BOTH a mood AND "
         "a gesture cue at the very start of every single reply. No reply is ever sent "
         "without both. Use this exact format with no spaces inside the brackets: "
@@ -169,4 +246,5 @@ def build_system_prompt(
         + (_orpheus_emotion_block() if backend == "orpheus" else "")
         + _language_block(language)
         + memory_block(recalled_memory)
+        + recent_block(recent_turns or [])
     )
