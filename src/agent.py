@@ -19,6 +19,7 @@ import asyncio
 import base64
 import json
 import logging
+import os
 import re
 import time
 from typing import AsyncIterable
@@ -26,6 +27,14 @@ from typing import AsyncIterable
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# When LK_OPENAI_DEBUG=1, livekit-agents logs the full chat.completions.create
+# payload (chat_ctx, tool_schemas, tool_choice) at DEBUG level. The default
+# log level is INFO so the entry never appears unless we bump this logger.
+# Narrow exception to the no-os.getenv-outside-config rule: this is purely
+# diagnostic plumbing for a third-party debug flag — not config used by code.
+if os.getenv("LK_OPENAI_DEBUG"):
+    logging.getLogger("livekit.agents").setLevel(logging.DEBUG)
 
 from livekit import rtc  # noqa: E402
 from livekit.agents import (  # noqa: E402
@@ -47,7 +56,7 @@ from auth import SessionIdentity, init_db  # noqa: E402
 from config import Config  # noqa: E402
 from llm import build_chat_llm, build_system_prompt  # noqa: E402
 from memory import build_provider  # noqa: E402
-from tools import TOOL_CATALOG  # noqa: E402
+from tools import TOOL_CATALOG, set_event_sink as set_tool_event_sink  # noqa: E402
 from tts import (  # noqa: E402
     KokoroConfig,
     KokoroTTS,
@@ -68,6 +77,15 @@ logger = logging.getLogger("voice-agent")
 CUE_RE = re.compile(r"\[\s*(mood|gesture|pose)\s*:\s*([a-zA-Z_]+)\s*\]", re.IGNORECASE)
 ANY_BRACKET_RE = re.compile(r"\[[^\]]{0,40}\]")
 
+# Tool-call XML the LLM emits when invoking a function. mlx-vlm's streaming
+# implementation has a quirk where this raw XML leaks into the `content`
+# field of intermediate stream chunks (the parsed `tool_calls` array only
+# arrives in the FINAL chunk). Without filtering, the avatar literally
+# speaks "<tool_call> <function= online_search > ..." aloud. We strip both
+# the complete blocks and any partial open tag at the buffer tail.
+TOOL_CALL_RE = re.compile(r"<tool_call>.*?</tool_call>", re.DOTALL | re.IGNORECASE)
+TOOL_CALL_OPEN = "<tool_call>"
+
 
 class VoiceAgent(Agent):
     """Wraps the LiveKit Agent with two extras:
@@ -86,15 +104,41 @@ class VoiceAgent(Agent):
         self._publish_cue = publish_cue or (lambda kind, value: None)
 
     async def tts_node(self, text: AsyncIterable[str], model_settings):
-        """Strip [mood:X]/[gesture:Y]/[pose:Z] cues from outgoing text
-        and publish them via DataChannel before the cleaned text is
-        spoken. Without this, Kokoro/Orpheus would speak the brackets."""
+        """Strip [mood:X]/[gesture:Y]/[pose:Z] cues AND <tool_call>...</tool_call>
+        XML from outgoing text before TTS sees it. Cues are published as
+        DataChannel events; tool-call XML is dropped (the parsed tool_calls
+        already came through livekit's structured channel, this XML is just
+        mlx-vlm streaming-format noise — see TOOL_CALL_RE comment)."""
+
+        def _earliest_unsafe(s: str) -> int:
+            """Earliest index from which `s` must be held back because it
+            could be the start of an incomplete cue or tool_call XML.
+            Returns -1 when the whole buffer is safe to flush."""
+            candidates: list[int] = []
+            # Last `[` — anything after it could be an incomplete cue
+            # (complete cues were already stripped by CUE_RE upstream).
+            i_cue = s.rfind("[")
+            if i_cue != -1:
+                candidates.append(i_cue)
+            # First `<tool_call>` — the close tag may not have arrived yet.
+            i_tc = s.lower().find(TOOL_CALL_OPEN)
+            if i_tc != -1:
+                candidates.append(i_tc)
+            else:
+                # Tail might be a partial prefix of `<tool_call>` (e.g. `<too`).
+                # Hold back from there until we see the full open or rule it out.
+                tail_start = max(0, len(s) - len(TOOL_CALL_OPEN) + 1)
+                for i in range(tail_start, len(s)):
+                    if TOOL_CALL_OPEN.startswith(s[i:].lower()):
+                        candidates.append(i)
+                        break
+            return min(candidates) if candidates else -1
 
         async def filtered():
             buf = ""
             async for chunk in text:
                 buf += chunk
-                # Drain any complete cue tags
+                # Drain complete cue tags (publish each one out-of-band)
                 while True:
                     m = CUE_RE.search(buf)
                     if not m:
@@ -105,9 +149,15 @@ class VoiceAgent(Agent):
                     except Exception as e:
                         logger.warning("publish_cue failed: %s", e)
                     buf = buf[: m.start()] + buf[m.end() :]
-                # Yield text up to the last possible tag start so we
-                # never split a tag across chunks.
-                safe = buf.rfind("[")
+                # Drain complete tool_call XML blocks (just discard — the
+                # parsed call already fired via livekit's tool dispatch)
+                while True:
+                    m = TOOL_CALL_RE.search(buf)
+                    if not m:
+                        break
+                    buf = buf[: m.start()] + buf[m.end() :]
+                # Yield up to the earliest possibly-incomplete tag start
+                safe = _earliest_unsafe(buf)
                 if safe == -1:
                     if buf:
                         yield buf
@@ -115,10 +165,15 @@ class VoiceAgent(Agent):
                 elif safe > 0:
                     yield buf[:safe]
                     buf = buf[safe:]
-            # Final flush: drop any unmatched bracketed content rather
-            # than letting TTS speak "[mood happy" out loud.
+            # Final flush: drop any unmatched bracketed content + any
+            # leftover tool_call XML (complete or open-only) rather than
+            # letting TTS speak `[mood happy` or `<tool_call>` out loud.
             if buf:
-                cleaned = ANY_BRACKET_RE.sub("", buf).replace("[", "")
+                cleaned = TOOL_CALL_RE.sub("", buf)
+                cleaned = re.sub(
+                    r"<tool_call>.*$", "", cleaned, flags=re.DOTALL | re.IGNORECASE
+                )
+                cleaned = ANY_BRACKET_RE.sub("", cleaned).replace("[", "")
                 if cleaned.strip():
                     yield cleaned
 
@@ -234,8 +289,13 @@ async def entrypoint(ctx):
     # hiccup must NOT block session start, so swallow any exception.
     recent_turns: list = []
     try:
+        # Why 6, not 20: a deeper window biases the model toward repeating
+        # whatever it did last time — even when that was wrong (a tool
+        # call it skipped, a wrong answer, a stale persona). 6 turns is
+        # enough for "we were just talking about X" without giving the
+        # model 10 example responses to imitate verbatim.
         recent_turns = await asyncio.to_thread(
-            db.recent_transcripts, identity.id, 20
+            db.recent_transcripts, identity.id, 6
         )
         logger.info(
             "recalled %d recent turns for avatar=%s",
@@ -271,6 +331,12 @@ async def entrypoint(ctx):
 
     def _publish_cue(kind: str, value: str):
         _publish({"type": kind, "value": value})
+
+    # Wire tool start/end/error events to the same DataChannel pipe so
+    # the UI can show a live "tool running" pill while a function is
+    # executing. ContextVar-scoped — propagates through the asyncio
+    # task chain that runs the tool, doesn't leak between sessions.
+    set_tool_event_sink(_publish)
 
     # Surface session-start recall latency to the metrics pill.
     _publish({"type": "memory", "op": "read", "ms": _recall_ms})
