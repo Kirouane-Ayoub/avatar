@@ -12,6 +12,16 @@ import {
 import { useLipsyncDriver } from '../hooks/useLipsyncDriver';
 import { detectGesture, detectMood } from '../data/detect';
 import { CamIcon, MicIcon } from './icons';
+import { TOOL_CATALOG } from '../data/tools';
+
+// Friendly verb + emoji per tool — short, action-oriented so the pill
+// reads naturally ("Searching the web…" not "Web search running…").
+// Falls back to the catalog label for any unknown tool.
+const TOOL_VERB: Record<string, { icon: string; verb: string }> = {
+  online_search: { icon: '🔎', verb: 'Searching the web' },
+  internal_search: { icon: '📚', verb: 'Looking through your docs' },
+  set_reminder: { icon: '⏰', verb: 'Setting a reminder' },
+};
 
 export interface ConnectionInfo {
   token: string;
@@ -244,6 +254,22 @@ export function SessionView({ setup, avatar, connection, onExit }: Props) {
             );
           })}
         </div>
+
+        {session.activeTool && (() => {
+          const verb = TOOL_VERB[session.activeTool.name];
+          const fallback = TOOL_CATALOG.find((t) => t.id === session.activeTool!.name);
+          const icon = verb?.icon ?? '⚙️';
+          const label = verb?.verb ?? fallback?.label ?? session.activeTool.name;
+          return (
+            <div className="session-tool" role="status" aria-live="polite">
+              <span className="session-tool-icon" aria-hidden>{icon}</span>
+              <span className="session-tool-label">{label}</span>
+              <span className="session-tool-dots" aria-hidden>
+                <i /><i /><i />
+              </span>
+            </div>
+          );
+        })()}
 
         {session.cameraPreview && (
           <div className="session-cam">
