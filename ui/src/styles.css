@@ -1226,6 +1226,72 @@ code {
 .metric-value.slow { color: #f87171; }
 .metric-value.idle { color: #3f3f46; }
 
+/* Live "tool running" pill, mounted on the avatar stage while a function
+   call is in flight. Same visual idiom as .session-badge / .session-metrics
+   (blurred dark pill) so it reads as session chrome, not chat content.
+   Sits bottom-center to stay clear of metrics (top-right) and cam (right).
+   Note: NO backdrop-filter blur here on purpose — overlapping the WebGL
+   canvas with a blur tanked the avatar idle frame rate (see CLAUDE.md
+   "backdrop-filter ... tanks framerate" gotcha). Solid-ish background
+   instead. */
+.session-tool {
+  position: absolute;
+  bottom: 84px;
+  left: 50%;
+  transform: translate(-50%, 6px);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px 7px 12px;
+  border-radius: 999px;
+  background: rgba(9, 9, 11, 0.92);
+  border: 1px solid rgba(99, 102, 241, 0.35);
+  font-size: 0.72rem;
+  color: #e4e4e7;
+  z-index: 3;
+  opacity: 0;
+  animation: session-tool-in 220ms ease-out forwards;
+  box-shadow:
+    0 6px 24px rgba(0, 0, 0, 0.4),
+    0 0 0 1px rgba(99, 102, 241, 0.12),
+    0 0 18px rgba(99, 102, 241, 0.18);
+}
+@keyframes session-tool-in {
+  from { opacity: 0; transform: translate(-50%, 10px) scale(0.96); }
+  to   { opacity: 1; transform: translate(-50%, 0) scale(1); }
+}
+.session-tool-icon {
+  font-size: 0.95rem;
+  line-height: 1;
+  animation: session-tool-icon-pulse 1.4s ease-in-out infinite;
+}
+@keyframes session-tool-icon-pulse {
+  0%, 100% { transform: scale(1) rotate(0deg); }
+  50%      { transform: scale(1.18) rotate(-6deg); }
+}
+.session-tool-label {
+  letter-spacing: 0.02em;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.session-tool-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 2px;
+}
+.session-tool-dots i {
+  width: 4px; height: 4px; border-radius: 50%;
+  background: rgba(165, 180, 252, 0.85);
+  animation: session-tool-dot 1s ease-in-out infinite;
+}
+.session-tool-dots i:nth-child(2) { animation-delay: 0.15s; }
+.session-tool-dots i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes session-tool-dot {
+  0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
+  40%           { opacity: 1;    transform: translateY(-3px); }
+}
+
 /* Self-view during the call. Mirrors the wizard's .stage-cam-bubble
    look — same 16:9 rounded card, same multi-layer shadow, same fade-in.
    The .stage-cam-live + .stage-cam-label overlay rules apply here too
