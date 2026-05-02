@@ -18,6 +18,17 @@ export type CueType = 'mood' | 'gesture' | 'pose';
 
 export type MetricKey = 'stt' | 'llm' | 'tts' | 'e2e' | 'memR' | 'memW';
 
+// Active function-tool invocation surfaced on the avatar stage. `name` is
+// the tool function name (e.g. "online_search"); the UI maps it to a
+// friendly label + icon. `since` lets the pill render an elapsed-time
+// counter and gives us a min-on-screen window so a fast tool doesn't
+// flicker the badge in and out.
+export interface ActiveTool {
+  name: string;
+  args?: string;
+  since: number;
+}
+
 export interface TranscriptSegment {
   id: string;
   role: 'user' | 'agent';
@@ -46,6 +57,7 @@ export interface SessionState {
   error: string | null;
   transcripts: TranscriptSegment[];
   metrics: Partial<Record<MetricKey, number>>;
+  activeTool: ActiveTool | null;
   remoteAudio: MediaStream | null;
   cameraPreview: MediaStream | null;
   micMuted: boolean;
@@ -69,6 +81,10 @@ const ORPHEUS_EMOTE_RE = /<\s*(laugh|sigh|chuckle|cough|sniffle|groan|yawn|gasp)
 const WHISPER_GAIN = 2.5;
 const NORMAL_GAIN = 1.0;
 
+// Minimum on-screen time for the tool-activity pill. Stub tools complete
+// in <1 ms and would flash invisibly without this floor.
+const MIN_TOOL_DISPLAY_MS = 800;
+
 export function useSession(
   args: SessionArgs | null,
   handlers: SessionHandlers,
@@ -77,6 +93,7 @@ export function useSession(
   const [error, setError] = useState<string | null>(null);
   const [transcripts, setTranscripts] = useState<TranscriptSegment[]>([]);
   const [metrics, setMetrics] = useState<Partial<Record<MetricKey, number>>>({});
+  const [activeTool, setActiveTool] = useState<ActiveTool | null>(null);
   const [remoteAudio, setRemoteAudio] = useState<MediaStream | null>(null);
   const [cameraPreview, setCameraPreview] = useState<MediaStream | null>(null);
   const [micMuted, setMicMutedState] = useState(false);
@@ -245,6 +262,31 @@ export function useSession(
               }),
             }));
             break;
+          case 'tool':
+            // { type:"tool", op:"start"|"end"|"error", name, args?, took_ms? }
+            // Hold the pill on screen for at least MIN_TOOL_DISPLAY_MS so a
+            // <100ms stub call still registers visually (otherwise the
+            // start/end pair fires in the same frame and the user sees
+            // nothing). Real network-bound tools are slower than this so
+            // the floor is never reached in production.
+            if (d.op === 'start' && d.name) {
+              setActiveTool({ name: d.name, args: d.args, since: Date.now() });
+            } else if (d.op === 'end' || d.op === 'error') {
+              setActiveTool((cur) => {
+                if (!cur || cur.name !== d.name) return cur;
+                const elapsed = Date.now() - cur.since;
+                const wait = Math.max(0, MIN_TOOL_DISPLAY_MS - elapsed);
+                if (wait === 0) return null;
+                window.setTimeout(
+                  () => setActiveTool((latest) =>
+                    latest && latest.since === cur.since ? null : latest,
+                  ),
+                  wait,
+                );
+                return cur;
+              });
+            }
+            break;
         }
       } catch { /* ignore malformed payloads */ }
     };
@@ -374,6 +416,7 @@ export function useSession(
     error,
     transcripts,
     metrics,
+    activeTool,
     remoteAudio,
     cameraPreview,
     micMuted,
