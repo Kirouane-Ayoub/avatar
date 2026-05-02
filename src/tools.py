@@ -20,13 +20,51 @@ here's what it returned in N ms".
 
 from __future__ import annotations
 
+import asyncio
 import functools
 import logging
 import time
+from typing import Any, Callable, Optional
 
 from livekit.agents.llm import function_tool
 
+
+# Temporary: artificial latency on every tool so the UI's "tool running"
+# pill stays on screen long enough to see. The stubs return in <1 ms,
+# which makes the badge flash invisibly. Set to 0 (or remove the await)
+# once real backends (DuckDuckGo, etc.) are wired and naturally take 1-3 s.
+_FAKE_TOOL_LATENCY_SEC = 10.0
+
 logger = logging.getLogger("voice-agent-tools")
+
+
+# Per-session sink for tool start/end/error events. agent.py wires this
+# at session start so the UI gets a live "tool activity" pill while a
+# function is running. Module-level (not ContextVar): livekit-agents
+# spawns the tool-execution task from internal machinery whose Context
+# was captured BEFORE we set the sink, so contextvars don't propagate
+# in. Single-session-per-worker deployments — concurrent sessions in
+# the same process would see this clobber. Revisit when that lands.
+_event_sink: Optional[Callable[[dict[str, Any]], None]] = None
+
+
+def set_event_sink(fn: Optional[Callable[[dict[str, Any]], None]]) -> None:
+    """Wire the session sink. agent.py calls this with a closure that
+    publishes events on the LiveKit DataChannel. None disables event
+    forwarding (e.g. for tests / standalone runs)."""
+    global _event_sink
+    _event_sink = fn
+
+
+def _emit(event: dict[str, Any]) -> None:
+    """Best-effort send to the active sink. Swallow exceptions so a
+    DataChannel hiccup never breaks the tool execution path."""
+    if _event_sink is None:
+        return
+    try:
+        _event_sink(event)
+    except Exception as e:
+        logger.warning("tool event sink failed: %s", e)
 
 
 def _log_tool(func):
@@ -54,6 +92,7 @@ def _log_tool(func):
         )
         sig = ", ".join(p for p in (args_repr, kwargs_repr) if p)
         logger.info("TOOL ▶ %s(%s)", name, sig)
+        _emit({"type": "tool", "op": "start", "name": name, "args": sig[:120]})
 
         t0 = time.monotonic()
         try:
@@ -61,11 +100,16 @@ def _log_tool(func):
         except Exception as e:
             took_ms = round((time.monotonic() - t0) * 1000)
             logger.exception("TOOL ✗ %s | took=%dms error=%s", name, took_ms, e)
+            _emit({
+                "type": "tool", "op": "error", "name": name,
+                "took_ms": took_ms, "error": str(e)[:200],
+            })
             raise
 
         took_ms = round((time.monotonic() - t0) * 1000)
         result_preview = repr(result)[:200] if result is not None else "None"
         logger.info("TOOL ◀ %s | took=%dms result=%s", name, took_ms, result_preview)
+        _emit({"type": "tool", "op": "end", "name": name, "took_ms": took_ms})
         return result
 
     return wrapper
@@ -77,6 +121,7 @@ def _log_tool(func):
 @_log_tool
 async def set_reminder(message: str, seconds: int) -> str:
     """Acknowledge the reminder (actual timer would need background task)."""
+    await asyncio.sleep(_FAKE_TOOL_LATENCY_SEC)
     if seconds < 0:
         return "Duration must be positive"
     if seconds >= 3600:
@@ -92,6 +137,7 @@ async def set_reminder(message: str, seconds: int) -> str:
 @_log_tool
 async def online_search(query: str) -> str:
     """Stub — to be wired up to a real web search backend later."""
+    await asyncio.sleep(_FAKE_TOOL_LATENCY_SEC)
     return f"(online_search not implemented yet — would search for: {query})"
 
 
@@ -99,6 +145,7 @@ async def online_search(query: str) -> str:
 @_log_tool
 async def internal_search(query: str) -> str:
     """Stub — to be wired up to a real internal search backend later."""
+    await asyncio.sleep(_FAKE_TOOL_LATENCY_SEC)
     return f"(internal_search not implemented yet — would search for: {query})"
 
 
