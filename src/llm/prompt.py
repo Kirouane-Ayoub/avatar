@@ -104,13 +104,18 @@ def recent_block(turns: list) -> str:
     is Mem0's distilled facts.
 
     Returns "" when there are no prior turns, so the caller can string-
-    concat without conditionals. Capped at the last 20 lines defensively
-    in case more get passed in.
+    concat without conditionals. Capped defensively at 6 lines (the
+    agent's recall depth is also 6 — see agent.py for why).
+
+    Framing matters: without an explicit "this is history, not a
+    template" line, the model imitates whatever it said last time —
+    including past mistakes (skipped tool calls, stale personas, wrong
+    answers). The footer below tells it to USE the context, not COPY it.
     """
     if not turns:
         return ""
     lines = []
-    for t in turns[-20:]:
+    for t in turns[-6:]:
         speaker = "Friend" if t.role == "user" else "You"
         text = (t.text or "").strip()
         if not text:
@@ -120,9 +125,13 @@ def recent_block(turns: list) -> str:
         return ""
     return (
         "\n\nRECENT CONVERSATION (the last things you and your friend said, "
-        "from a previous session — pick up naturally if it makes sense, but "
-        "don't force a reference to it):\n"
+        "from a previous session):\n"
         + "\n".join(lines)
+        + "\nUse this for CONTEXT only (you remember what was talked about). "
+        "Do NOT treat your prior YOU lines as a template for how to reply now "
+        "— your current instructions, tools, and persona take precedence over "
+        "anything you said before. If a past reply was wrong (e.g. you "
+        "promised to search but didn't), don't repeat that mistake."
     )
 
 
@@ -156,11 +165,14 @@ def _tools_block(tool_ids: list[str]) -> str:
     return (
         "\n\nTOOLS YOU HAVE:\n"
         + "\n".join(parts)
-        + "\nWhen the user's request matches one of these, CALL THE TOOL — "
-        "actually emit the function call. NEVER promise to search / look "
-        "up / fetch something and then answer from memory; that's a lie. "
-        "Don't preface the call with \"hold on, let me check\" — just call "
-        "it silently, then react to the result like you already knew."
+        + "\nWhen the user's request matches one of these, do BOTH in the "
+        "same reply: (1) say a short, casual verbal hold (\"hold on, let me "
+        "check\", \"one sec, looking that up\", \"give me a moment\") so "
+        "your friend hears that you heard them, then (2) emit the function "
+        "call right after. Both in one turn — the tool runs immediately, "
+        "you'll have the answer in seconds, and your next reply can react "
+        "to the result. NEVER promise to search / look up / fetch something "
+        "and then answer from memory without calling the tool; that's a lie."
     )
 
 
