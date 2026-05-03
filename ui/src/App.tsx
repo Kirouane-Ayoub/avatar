@@ -24,6 +24,10 @@ const DEFAULT_SETUP: SessionSetup = {
   // Quiet companion by default — proactive check-ins are opt-in per
   // avatar via the AvatarEditor toggle.
   proactive: false,
+  // ON by default to preserve historical behavior (watcher always ran
+  // when VLM was configured). Toggle off in the editor to disable
+  // passive mood reading without disabling the camera entirely.
+  vision_watcher: true,
 };
 
 /**
@@ -64,6 +68,7 @@ export default function App() {
       avatar: activeAvatar.avatar_key || prev.avatar,
       tools: activeAvatar.tools.length ? activeAvatar.tools : prev.tools,
       proactive: activeAvatar.proactive,
+      vision_watcher: activeAvatar.vision_watcher,
       // mood is intentionally NOT seeded from the avatar — it has no
       // persisted mood. Use whatever the wizard previously had.
     }));
