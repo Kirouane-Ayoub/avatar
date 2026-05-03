@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from typing import Optional, Protocol
 
 from config import Config
@@ -212,10 +213,18 @@ class Mem0Provider:
         if not cleaned:
             return
 
-        logger.info(
-            "memory.batch: user=%s messages=%d (first=%r)",
-            user_id, len(cleaned), cleaned[0]["content"][:80],
-        )
+        # Don't log message content by default — it's PII (relationships,
+        # health, etc.). LOG_USER_TEXT=1 inlines for local debugging only.
+        if os.getenv("LOG_USER_TEXT") == "1":
+            logger.info(
+                "memory.batch: user=%s messages=%d (first=%r)",
+                user_id, len(cleaned), cleaned[0]["content"][:80],
+            )
+        else:
+            logger.info(
+                "memory.batch: user=%s messages=%d (first_len=%d)",
+                user_id, len(cleaned), len(cleaned[0]["content"]),
+            )
         try:
             result = await asyncio.to_thread(
                 self._memory.add,
@@ -237,11 +246,24 @@ class Mem0Provider:
             if not items:
                 logger.info("memory.batch -> no facts extracted user=%s", user_id)
             else:
-                for it in items:
-                    event = it.get("event", "?")
-                    mem = (it.get("memory") or "").strip()
+                # Same redaction policy: opt-in LOG_USER_TEXT=1 to see the
+                # actual extracted facts. By default emit count + event
+                # types only so log shippers don't carry distilled PII.
+                if os.getenv("LOG_USER_TEXT") == "1":
+                    for it in items:
+                        event = it.get("event", "?")
+                        mem = (it.get("memory") or "").strip()
+                        logger.info(
+                            "memory.batch -> %s: %r user=%s", event, mem[:120], user_id
+                        )
+                else:
+                    events: dict[str, int] = {}
+                    for it in items:
+                        evt = it.get("event", "?")
+                        events[evt] = events.get(evt, 0) + 1
                     logger.info(
-                        "memory.batch -> %s: %r user=%s", event, mem[:120], user_id
+                        "memory.batch -> %d facts user=%s by_event=%s",
+                        len(items), user_id, events,
                     )
         except Exception:
             logger.info("memory.batch -> raw=%s user=%s", str(result)[:200], user_id)
