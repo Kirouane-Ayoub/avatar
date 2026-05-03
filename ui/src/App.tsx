@@ -92,6 +92,12 @@ export default function App() {
       if ('voice' in next) dbPatch.voice = next.voice || null;
       if ('avatar' in next) dbPatch.avatar_key = next.avatar ?? null;
       if ('tools' in next) dbPatch.tools = next.tools;
+      // Behavior toggles persist on every change too — without this
+      // they'd only reach the DB at session start (via /api/token's
+      // update_profile), so a user who toggles + bounces back to the
+      // picker would silently lose the change.
+      if ('proactive' in next) dbPatch.proactive = next.proactive;
+      if ('vision_watcher' in next) dbPatch.vision_watcher = next.vision_watcher;
       if (Object.keys(dbPatch).length === 0) return;
       // Fire-and-forget — UI doesn't block on the persist round-trip.
       // Errors are non-fatal: the wizard still works locally; the
@@ -133,7 +139,6 @@ export default function App() {
         token={auth.token!}
         username={auth.user.username}
         onLogout={auth.logout}
-        onDeleteAccount={auth.deleteAccount}
         onPick={setActiveAvatar}
       />
     );
