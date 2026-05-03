@@ -28,6 +28,7 @@ interface Props {
   onDeleteAccount?: () => void | Promise<void>;
   // Return to the avatar picker without disconnecting / signing out.
   // Wizard is per-avatar so this is the "switch companion" affordance.
+  // Per-avatar "Forget memory" lives on the picker cards, not here.
   onBackToPicker?: () => void;
 }
 
