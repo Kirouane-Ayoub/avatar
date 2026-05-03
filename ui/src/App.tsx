@@ -21,6 +21,9 @@ const DEFAULT_SETUP: SessionSetup = {
   voice: '',
   tools: TOOL_CATALOG.map((t) => t.id),
   camera: false,
+  // Quiet companion by default — proactive check-ins are opt-in per
+  // avatar via the AvatarEditor toggle.
+  proactive: false,
 };
 
 /**
@@ -60,6 +63,7 @@ export default function App() {
       voice: activeAvatar.voice ?? prev.voice,
       avatar: activeAvatar.avatar_key || prev.avatar,
       tools: activeAvatar.tools.length ? activeAvatar.tools : prev.tools,
+      proactive: activeAvatar.proactive,
       // mood is intentionally NOT seeded from the avatar — it has no
       // persisted mood. Use whatever the wizard previously had.
     }));
