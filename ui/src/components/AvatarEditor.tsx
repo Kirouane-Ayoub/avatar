@@ -24,8 +24,10 @@ interface Props {
   user?: AuthUser;
   onLogout?: () => void | Promise<void>;
   // Permanently delete the user + all memories. Wizard prompts for the
-  // username typed back as confirmation before calling.
-  onDeleteAccount?: () => void | Promise<void>;
+  // username typed back AND the current password as confirmation
+  // before calling — JWT alone isn't enough authority for irreversible
+  // wipe.
+  onDeleteAccount?: (password: string) => void | Promise<void>;
   // Return to the avatar picker without disconnecting / signing out.
   // Wizard is per-avatar so this is the "switch companion" affordance.
   // Per-avatar "Forget memory" lives on the picker cards, not here.
@@ -43,17 +45,24 @@ export function AvatarEditor({
   setup, onChange, onStart, starting, error,
   user, onLogout, onDeleteAccount, onBackToPicker,
 }: Props) {
-  // Type-the-username confirmation prevents accidental account loss.
+  // Type-the-username + re-enter-password confirmation prevents both
+  // accidental account loss AND a stolen-JWT remote wipe.
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const confirmDeleteAccount = async () => {
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const confirmDeleteAccount = async (args?: { password?: string }) => {
     if (!onDeleteAccount) return;
+    const password = args?.password ?? '';
+    if (!password) return;
     setDeleting(true);
+    setDeleteError(null);
     try {
-      await onDeleteAccount();
+      await onDeleteAccount(password);
+      setDeleteOpen(false);
+    } catch (err) {
+      setDeleteError((err as Error).message || 'Delete failed');
     } finally {
       setDeleting(false);
-      setDeleteOpen(false);
     }
   };
 
@@ -343,14 +352,23 @@ export function AvatarEditor({
           open={deleteOpen}
           tone="danger"
           title={`Delete @${user.username}?`}
-          description="This permanently erases your account, every companion, and all conversation memory. This action cannot be undone."
+          description={
+            deleteError
+              ? `${deleteError}. This permanently erases your account, every companion, and all conversation memory.`
+              : 'This permanently erases your account, every companion, and all conversation memory. This action cannot be undone.'
+          }
           confirmPhrase={user.username}
           confirmPhraseLabel="Type your username to confirm:"
+          passwordLabel="Re-enter your password:"
           confirmLabel="Delete account"
           cancelLabel="Keep account"
           busy={deleting}
           onConfirm={confirmDeleteAccount}
-          onCancel={() => !deleting && setDeleteOpen(false)}
+          onCancel={() => {
+            if (deleting) return;
+            setDeleteError(null);
+            setDeleteOpen(false);
+          }}
         />
       )}
     </div>
