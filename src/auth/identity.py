@@ -35,6 +35,12 @@ from .db import Db
 logger = logging.getLogger("identity")
 
 
+class UnknownAvatarError(RuntimeError):
+    """Raised when participant.identity points at an avatar that no
+    longer exists. Caller (agent.py:entrypoint) is expected to disconnect
+    cleanly rather than synthesize a fallback identity."""
+
+
 @dataclass(frozen=True)
 class SessionIdentity:
     """Everything the agent needs to set up a session.
@@ -88,23 +94,18 @@ class SessionIdentity:
         avatar_id = participant.identity or ""
         avatar = db.get_avatar(avatar_id) if avatar_id else None
         if avatar is None:
-            # Falling back gracefully even if the avatar row is gone —
-            # the session can still proceed with a synthesized
-            # placeholder. Memory will still be keyed by the (now
-            # orphaned) avatar_id, which is fine.
-            logger.warning(
-                "session for unknown avatar_id=%s — proceeding with placeholder",
+            # Fail closed: an unknown avatar_id means either the row was
+            # deleted between token issue and session start, or the token
+            # was forged. Either way, falling back to user-supplied
+            # wizard metadata would let the session run with a persona
+            # the server never validated. Refuse the connect instead and
+            # let the agent surface a clean error.
+            logger.error(
+                "session refused for unknown avatar_id=%s (deleted or forged)",
                 avatar_id,
             )
-            return cls(
-                id=avatar_id or "anonymous",
-                user_id="",
-                name=(cfg.get("name") or "Assistant").strip() or "Assistant",
-                persona=(cfg.get("persona") or default_persona).strip() or default_persona,
-                body=cfg.get("body") if cfg.get("body") in {"F", "M"} else "F",
-                voice=cfg.get("voice") or None,
-                language=cfg.get("language") if cfg.get("language") in {"en", "ja"} else None,
-                requested_tool_ids=list(cfg.get("tools") or []),
+            raise UnknownAvatarError(
+                f"avatar_id {avatar_id!r} not found — refusing to start session"
             )
 
         # Per-field DB → wizard → default fallback. Avatar fields are
