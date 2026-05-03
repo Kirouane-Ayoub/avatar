@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { VoiceBackend, VoiceInfo } from '../types';
-import { fetchVoices, voiceSampleUrl } from '../api';
+import { fetchVoices, fetchVoiceSample } from '../api';
 import { sampleTextFor } from '../data/voice_samples';
 
 type BackendFilter = 'all' | VoiceBackend;
@@ -205,11 +205,7 @@ export function VoicePicker({ value, onChange, name }: Props) {
     abortRef.current = controller;
 
     try {
-      const res = await fetch(voiceSampleUrl(voice.id, text), {
-        signal: controller.signal,
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const blob = await res.blob();
+      const blob = await fetchVoiceSample(voice.id, text, controller.signal);
       if (controller.signal.aborted) return;
 
       const url = URL.createObjectURL(blob);
