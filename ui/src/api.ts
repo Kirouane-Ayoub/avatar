@@ -21,6 +21,7 @@ export interface Avatar {
   voice: string | null;
   avatar_key: string | null;
   tools: string[];
+  proactive: boolean;
   last_used_at: string | null;
 }
 
