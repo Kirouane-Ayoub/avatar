@@ -59,6 +59,10 @@ class SessionIdentity:
     # the avatar will break silence and check in on the user. When False
     # (default), the avatar only speaks in response to user turns.
     proactive: bool = False
+    # Per-avatar toggle for the ambient mood watcher. Defaults True to
+    # preserve historical behavior. When False, no ambient mood cues
+    # are published — chat-time camera image injection is unaffected.
+    vision_watcher: bool = True
 
     @classmethod
     def from_participant(
@@ -129,6 +133,7 @@ class SessionIdentity:
             language=cfg_language,
             requested_tool_ids=list(tool_ids),
             proactive=bool(getattr(avatar, "proactive", False)),
+            vision_watcher=bool(getattr(avatar, "vision_watcher", True)),
         )
 
 
