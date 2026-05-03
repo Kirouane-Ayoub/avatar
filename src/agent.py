@@ -520,6 +520,23 @@ async def entrypoint(ctx):
             logger.info("Video track published by %s, subscribing...", p.identity)
             publication.set_subscribed(True)
 
+    # Catch tracks that were already published BEFORE this handler was
+    # registered. The agent typically joins after the user has had time
+    # to publish camera+mic — `track_published` is a future-only event,
+    # so without this loop we silently miss any pre-existing video track
+    # (audio is fine because AutoSubscribe.AUDIO_ONLY auto-subscribes
+    # it server-side). Enumerate every remote participant's current
+    # publications and force-subscribe to any unsubscribed video. The
+    # `track_subscribed` handler then wires the frame loop normally.
+    for remote in ctx.room.remote_participants.values():
+        for pub in remote.track_publications.values():
+            if pub.kind == rtc.TrackKind.KIND_VIDEO and not pub.subscribed:
+                logger.info(
+                    "Catching pre-existing video track from %s (sid=%s)",
+                    remote.identity, pub.sid,
+                )
+                pub.set_subscribed(True)
+
     @ctx.room.on("track_subscribed")
     def on_track_subscribed(track, publication, p):
         if track.kind == rtc.TrackKind.KIND_VIDEO:
@@ -656,13 +673,20 @@ async def entrypoint(ctx):
     await session.start(agent=agent, room=ctx.room)
 
     # ── Ambient affect watcher ──────────────────────────────────────────
-    # Optional: only runs when VLM is configured. Reads frames from
-    # agent._last_image_url, idle-gates against AgentSession state.
-    # We hold the watcher so ProactiveSpeaker can read get_last_mood().
+    # Two gates: the VLM endpoint must be configured (server-side env)
+    # AND this avatar must have vision_watcher=True (per-avatar opt-out
+    # via UI). When either is off the watcher is dormant — chat-time
+    # camera frame injection is unaffected (still happens whenever a
+    # video track is published). We hold the watcher so ProactiveSpeaker
+    # can read get_last_mood().
     watcher = None
-    if config.vlm_base_url:
+    if config.vlm_base_url and identity.vision_watcher:
         watcher = await _start_vision_watcher(
             config, session, agent, _publish_cue, ctx,
+        )
+    elif config.vlm_base_url:
+        logger.info(
+            "VisionWatcher disabled for this avatar (vision_watcher=False)",
         )
 
     # ── Proactive speaker ───────────────────────────────────────────────
@@ -689,6 +713,11 @@ async def entrypoint(ctx):
             config=ProactiveConfig(),
             get_states=get_states,
             get_last_mood=get_last_mood,
+            # Camera-frame presence drives the choice between camera-
+            # grounded and generic silence prompts. agent._last_image_url
+            # is set by set_frame() / cleared by clear_frame() — None
+            # means camera is off / no fresh frame.
+            has_camera_frame=lambda: agent._last_image_url is not None,
             fire=_fire_nudge,
         )
         await proactive_speaker.start()
