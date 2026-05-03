@@ -157,6 +157,23 @@ export async function deleteAvatar(token: string, avatarId: string): Promise<voi
   }
 }
 
+export interface ForgetAvatarResult {
+  ok: true;
+  transcripts_deleted: number;
+  memory_cleared: boolean;
+}
+
+// Wipe an avatar's memory (transcripts + Mem0 facts) without deleting
+// the avatar row. Used by the "Forget memory" button in the editor.
+export async function forgetAvatar(token: string, avatarId: string): Promise<ForgetAvatarResult> {
+  const res = await authedFetch(`/api/avatars/${avatarId}/forget`, token, {
+    method: 'POST',
+  });
+  const data = (await res.json().catch(() => ({}))) as ForgetAvatarResult & { error?: string };
+  if (!res.ok || !data.ok) throw new Error(data.error || `forget: HTTP ${res.status}`);
+  return data;
+}
+
 // ── Session token (LiveKit) ─────────────────────────────────────────────
 export async function requestToken(
   setup: SessionSetup,
