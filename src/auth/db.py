@@ -76,7 +76,8 @@ TRANSCRIPT_RETENTION = 200
 _USER_PUBLIC = "id, username, display_name, created_at, updated_at"
 _AVATAR_COLS = (
     "id, user_id, name, persona, voice, avatar_key, "
-    "tools_json, proactive, created_at, updated_at, last_used_at"
+    "tools_json, proactive, vision_watcher, "
+    "created_at, updated_at, last_used_at"
 )
 _TRANSCRIPT_COLS = "id, avatar_id, role, text, created_at"
 
@@ -122,6 +123,14 @@ CREATE TABLE IF NOT EXISTS avatars (
     -- FALSE (default), the avatar only speaks in response to user turns
     -- — quiet companion mode.
     proactive       BOOLEAN      NOT NULL DEFAULT FALSE,
+    -- Per-avatar toggle for the ambient VisionWatcher. When TRUE
+    -- (default — preserves prior behavior), the watcher periodically
+    -- classifies the camera frame into a mood cue. When FALSE, no
+    -- mood cues are emitted from camera; chat-time image injection
+    -- still works (the camera is still useful for the LLM seeing you
+    -- when you ask "do you like my shirt?"). Independent of the
+    -- camera toggle: camera off ⇒ no frames ⇒ watcher idle anyway.
+    vision_watcher  BOOLEAN      NOT NULL DEFAULT TRUE,
     created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
     -- Touched on every session start; lets the UI sort "recently chatted with"
@@ -161,6 +170,9 @@ DROP INDEX IF EXISTS avatars_user_id_idx;
 -- need the column added (CREATE TABLE IF NOT EXISTS skips it on
 -- existing tables). Default FALSE — opt-in.
 ALTER TABLE avatars ADD COLUMN IF NOT EXISTS proactive BOOLEAN NOT NULL DEFAULT FALSE;
+-- Default TRUE preserves prior behavior (watcher always ran whenever
+-- VLM was configured) for any avatar created before the column existed.
+ALTER TABLE avatars ADD COLUMN IF NOT EXISTS vision_watcher BOOLEAN NOT NULL DEFAULT TRUE;
 
 -- Convert avatars.tools_json from TEXT to JSONB. Wrapped in a DO block
 -- so it only fires when the column is still TEXT — re-running on JSONB
@@ -224,6 +236,11 @@ class Avatar:
     # opt-in). Drives src/proactive.py at session start. Off by default
     # — quiet companion mode is the safer baseline.
     proactive: bool
+    # Whether the ambient VisionWatcher runs for this avatar. ON by
+    # default to preserve historical behavior. Doesn't affect chat-time
+    # camera frame injection (that's still active whenever the camera
+    # track is published).
+    vision_watcher: bool
     created_at: datetime
     updated_at: datetime
     last_used_at: datetime
@@ -374,6 +391,7 @@ class Db:
         avatar_key: Optional[str] = None,
         tools: Optional[list] = None,
         proactive: bool = False,
+        vision_watcher: bool = True,
     ) -> Avatar:
         """Insert a new avatar for the given user. Required: user_id +
         name. All other fields optional — caller can fill them in
@@ -383,8 +401,9 @@ class Db:
                 cur.execute(
                     f"""
                     INSERT INTO avatars
-                        (user_id, name, persona, voice, avatar_key, tools_json, proactive)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        (user_id, name, persona, voice, avatar_key,
+                         tools_json, proactive, vision_watcher)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING {_AVATAR_COLS}
                     """,
                     (
@@ -395,6 +414,7 @@ class Db:
                         # reject the cast).
                         Json(tools) if tools is not None else None,
                         proactive,
+                        vision_watcher,
                     ),
                 )
                 row = cur.fetchone()
@@ -410,6 +430,7 @@ class Db:
         avatar_key: Optional[str] = None,
         tools: Optional[list] = None,
         proactive: Optional[bool] = None,
+        vision_watcher: Optional[bool] = None,
         touch_last_used: bool = False,
     ) -> Optional[Avatar]:
         """Patch update — only fields passed as kwargs are written. Set
@@ -435,6 +456,9 @@ class Db:
         if proactive is not None:
             sets.append("proactive = %s")
             params.append(proactive)
+        if vision_watcher is not None:
+            sets.append("vision_watcher = %s")
+            params.append(vision_watcher)
         if touch_last_used:
             sets.append("last_used_at = NOW()")
         if not sets:
@@ -577,6 +601,7 @@ def _row_to_avatar(row: dict) -> Avatar:
         avatar_key=row.get("avatar_key"),
         tools=tools,
         proactive=bool(row.get("proactive", False)),
+        vision_watcher=bool(row.get("vision_watcher", True)),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         last_used_at=row["last_used_at"],
