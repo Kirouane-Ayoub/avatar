@@ -55,6 +55,10 @@ class SessionIdentity:
     voice: Optional[str]
     language: Optional[str]
     requested_tool_ids: list = field(default_factory=list)
+    # Per-avatar opt-in: when True, the agent runs ProactiveSpeaker so
+    # the avatar will break silence and check in on the user. When False
+    # (default), the avatar only speaks in response to user turns.
+    proactive: bool = False
 
     @classmethod
     def from_participant(
@@ -124,6 +128,7 @@ class SessionIdentity:
             voice=voice,
             language=cfg_language,
             requested_tool_ids=list(tool_ids),
+            proactive=bool(getattr(avatar, "proactive", False)),
         )
 
 
