@@ -29,11 +29,14 @@ from typing import Any, Callable, Optional
 from livekit.agents.llm import function_tool
 
 
-# Temporary: artificial latency on every tool so the UI's "tool running"
-# pill stays on screen long enough to see. The stubs return in <1 ms,
-# which makes the badge flash invisibly. Set to 0 (or remove the await)
-# once real backends (DuckDuckGo, etc.) are wired and naturally take 1-3 s.
-_FAKE_TOOL_LATENCY_SEC = 10.0
+# Artificial latency on every tool so the UI's "tool running" pill stays
+# on screen long enough to see. The stubs return in <1 ms, which makes
+# the badge flash invisibly. Was 10 s — that turned a tool call into a
+# DoS amplifier (the LLM can request multiple tools per turn). 1.0 s is
+# enough for the UI pill to register without blocking the conversation
+# loop; set to 0 once real backends (DuckDuckGo, etc.) are wired and
+# naturally take 1-3 s.
+_FAKE_TOOL_LATENCY_SEC = 1.0
 
 logger = logging.getLogger("voice-agent-tools")
 
