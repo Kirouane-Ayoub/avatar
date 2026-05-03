@@ -125,6 +125,11 @@ def sanitize(body: dict) -> dict:
     body_type = body.get("body") if body.get("body") in ALLOWED_BODIES else "F"
     raw_tools = body.get("tools") or []
     tools = [t for t in raw_tools if t in ALLOWED_TOOLS]
+    # Per-avatar opt-in: when True the agent runs ProactiveSpeaker so the
+    # avatar will break silence and check in on the user. Default False
+    # (quiet companion). bool() handles both literal `true`/`false` JSON
+    # and Python truthy values defensively.
+    proactive = bool(body.get("proactive", False))
     camera = bool(body.get("camera", False))
     avatar = str(body.get("avatar") or "")[:80]
     requested_voice = body.get("voice")
@@ -138,6 +143,7 @@ def sanitize(body: dict) -> dict:
         "persona": persona,
         "mood": mood,
         "tools": tools,
+        "proactive": proactive,
         "camera": camera,
         "language": language,
         "body": body_type,
@@ -209,6 +215,7 @@ class Handler(SimpleHTTPRequestHandler):
             "voice": avatar.voice,
             "avatar_key": avatar.avatar_key,
             "tools": avatar.tools,
+            "proactive": avatar.proactive,
             "last_used_at": avatar.last_used_at.isoformat() if avatar.last_used_at else None,
         }
 
@@ -467,6 +474,7 @@ class Handler(SimpleHTTPRequestHandler):
                 voice=cfg.get("voice"),
                 avatar_key=cfg.get("avatar") or None,
                 tools=cfg.get("tools"),
+                proactive=cfg.get("proactive"),
                 touch_last_used=True,  # bumps last_used_at for "recently chatted" sort
             )
         except Exception:
@@ -517,6 +525,7 @@ class Handler(SimpleHTTPRequestHandler):
                 voice=cfg.get("voice"),
                 avatar_key=cfg.get("avatar") or None,
                 tools=cfg.get("tools") or None,
+                proactive=bool(cfg.get("proactive", False)),
             )
         except Exception as e:
             logger.exception("create_avatar failed")
@@ -549,6 +558,8 @@ class Handler(SimpleHTTPRequestHandler):
             kwargs["avatar_key"] = cfg.get("avatar") or None
         if "tools" in body:
             kwargs["tools"] = cfg.get("tools")
+        if "proactive" in body:
+            kwargs["proactive"] = bool(cfg.get("proactive", False))
         updated = _DB.update_avatar(avatar.id, **kwargs)
         self._send_json(200, {"avatar": self._avatar_to_json(updated) if updated else None})
 
