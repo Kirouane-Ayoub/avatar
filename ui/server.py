@@ -130,6 +130,11 @@ def sanitize(body: dict) -> dict:
     # (quiet companion). bool() handles both literal `true`/`false` JSON
     # and Python truthy values defensively.
     proactive = bool(body.get("proactive", False))
+    # Per-avatar opt-out for the ambient mood watcher. Default True
+    # mirrors the historical "always on when VLM available" behavior.
+    # Explicit-default approach: missing key → True (don't silently
+    # disable for clients that haven't been updated).
+    vision_watcher = bool(body.get("vision_watcher", True))
     camera = bool(body.get("camera", False))
     avatar = str(body.get("avatar") or "")[:80]
     requested_voice = body.get("voice")
@@ -144,6 +149,7 @@ def sanitize(body: dict) -> dict:
         "mood": mood,
         "tools": tools,
         "proactive": proactive,
+        "vision_watcher": vision_watcher,
         "camera": camera,
         "language": language,
         "body": body_type,
@@ -216,6 +222,7 @@ class Handler(SimpleHTTPRequestHandler):
             "avatar_key": avatar.avatar_key,
             "tools": avatar.tools,
             "proactive": avatar.proactive,
+            "vision_watcher": avatar.vision_watcher,
             "last_used_at": avatar.last_used_at.isoformat() if avatar.last_used_at else None,
         }
 
@@ -475,6 +482,7 @@ class Handler(SimpleHTTPRequestHandler):
                 avatar_key=cfg.get("avatar") or None,
                 tools=cfg.get("tools"),
                 proactive=cfg.get("proactive"),
+                vision_watcher=cfg.get("vision_watcher"),
                 touch_last_used=True,  # bumps last_used_at for "recently chatted" sort
             )
         except Exception:
@@ -526,6 +534,7 @@ class Handler(SimpleHTTPRequestHandler):
                 avatar_key=cfg.get("avatar") or None,
                 tools=cfg.get("tools") or None,
                 proactive=bool(cfg.get("proactive", False)),
+                vision_watcher=bool(cfg.get("vision_watcher", True)),
             )
         except Exception as e:
             logger.exception("create_avatar failed")
@@ -560,6 +569,8 @@ class Handler(SimpleHTTPRequestHandler):
             kwargs["tools"] = cfg.get("tools")
         if "proactive" in body:
             kwargs["proactive"] = bool(cfg.get("proactive", False))
+        if "vision_watcher" in body:
+            kwargs["vision_watcher"] = bool(cfg.get("vision_watcher", True))
         updated = _DB.update_avatar(avatar.id, **kwargs)
         self._send_json(200, {"avatar": self._avatar_to_json(updated) if updated else None})
 
