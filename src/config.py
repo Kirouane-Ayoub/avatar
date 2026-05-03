@@ -136,6 +136,24 @@ class Config:
             for lang, body, env_var, fallback in _VOICE_DEFAULT_KEYS
         }
 
+        # Refuse to boot with LiveKit's well-known dev defaults (`devkey`
+        # / `secret`) unless DEV=1 is set. These ship in .env.example for
+        # localhost convenience; on a non-localhost deployment they let
+        # anyone on the network mint identity tokens. Loud failure is the
+        # right tradeoff — silent acceptance is how this leaks to prod.
+        livekit_key = os.environ["LIVEKIT_API_KEY"]
+        livekit_secret = os.environ["LIVEKIT_API_SECRET"]
+        if os.getenv("DEV") != "1" and (
+            livekit_key == "devkey" or livekit_secret == "secret"
+        ):
+            raise RuntimeError(
+                "LIVEKIT_API_KEY/SECRET are set to LiveKit's public dev defaults "
+                "('devkey'/'secret'). These are documented and globally known — "
+                "any reachable network peer can mint tokens. Generate fresh "
+                "credentials and set them in .env, or pass DEV=1 to acknowledge "
+                "you are running on localhost only."
+            )
+
         # Resolve Mem0's fallback chain at config time — if MEM0_LLM_*
         # vars aren't set, fall back to the chat LLM config. This keeps
         # memory.py free of os.getenv calls.
@@ -148,8 +166,8 @@ class Config:
         return cls(
             # LiveKit
             livekit_url=os.environ["LIVEKIT_URL"],
-            livekit_api_key=os.environ["LIVEKIT_API_KEY"],
-            livekit_api_secret=os.environ["LIVEKIT_API_SECRET"],
+            livekit_api_key=livekit_key,
+            livekit_api_secret=livekit_secret,
             livekit_external_url=os.getenv(
                 "LIVEKIT_EXTERNAL_URL", os.environ["LIVEKIT_URL"]
             ),
