@@ -2,10 +2,15 @@ services:
   livekit-server:
     image: livekit/livekit-server
     container_name: livekit-server
+    # Loopback-only port mapping. Browser on the same machine reaches us
+    # via localhost; LAN peers (coffee-shop wifi, hotspot) cannot. This
+    # is the line of defense if LIVEKIT_API_SECRET ever leaks — without
+    # it, anyone on the network can join rooms with a forged token.
+    # Drop the `127.0.0.1:` prefix only when fronting with a TLS proxy.
     ports:
-      - "7880:7880"
-      - "7881:7881"
-      - "7882:7882/udp"
+      - "127.0.0.1:7880:7880"
+      - "127.0.0.1:7881:7881"
+      - "127.0.0.1:7882:7882/udp"
     command: --dev --bind 0.0.0.0 --node-ip 0.0.0.0
     networks:
       - avatar-network
@@ -14,8 +19,10 @@ services:
     image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
     container_name: kokoro-tts
     restart: unless-stopped
+    # Loopback only — the agent reaches Kokoro via the docker-network DNS
+    # name (kokoro-tts:8880); the host port is for debugging only.
     ports:
-      - "8880:8880"
+      - "127.0.0.1:8880:8880"
     environment:
       # ONNX CPU optimization (4 performance cores on M4 Pro)
       - ONNX_NUM_THREADS=4
@@ -38,8 +45,9 @@ services:
   speaches:
     image: ghcr.io/speaches-ai/speaches:latest-cpu
     container_name: speaches
+    # Loopback only — same reasoning as kokoro-tts.
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
       - WHISPER__MODEL=Systran/faster-whisper-base
       - WHISPER__TTL=0
@@ -105,8 +113,11 @@ services:
         condition: service_healthy
       postgres-memory:
         condition: service_healthy
+    # Loopback only — the UI is for the user on this machine. To expose
+    # publicly, drop the prefix and front with a TLS proxy that handles
+    # auth-rate-limit + HSTS.
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     volumes:
       # Cache HuggingFace embedding model across container rebuilds —
       # without this, every `docker-compose up --build` re-downloads
