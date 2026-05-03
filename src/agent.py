@@ -54,8 +54,14 @@ from livekit.plugins import openai, silero  # noqa: E402
 
 from auth import SessionIdentity, init_db  # noqa: E402
 from config import Config  # noqa: E402
+from cues import GESTURES, MOODS, POSES  # noqa: E402
 from llm import build_chat_llm, build_system_prompt  # noqa: E402
 from memory import build_provider  # noqa: E402
+from proactive import (  # noqa: E402
+    ProactiveConfig,
+    ProactiveSpeaker,
+    is_synthetic_user_message,
+)
 from tools import TOOL_CATALOG, set_event_sink as set_tool_event_sink  # noqa: E402
 from tts import (  # noqa: E402
     KokoroConfig,
@@ -76,6 +82,17 @@ logger = logging.getLogger("voice-agent")
 # (stripping cues from assistant text before it goes into memory).
 CUE_RE = re.compile(r"\[\s*(mood|gesture|pose)\s*:\s*([a-zA-Z_]+)\s*\]", re.IGNORECASE)
 ANY_BRACKET_RE = re.compile(r"\[[^\]]{0,40}\]")
+
+# Canonical cue vocabularies, indexed by tag kind. The LLM occasionally
+# ad-libs values outside this set (we observed `mood:playful`) which the
+# UI's TalkingHead then rejects with `Error: Unknown mood`. Filter here
+# so unknown cues are dropped at the source — UI never sees them.
+_VALID_CUE_VALUES: dict[str, set[str]] = {
+    "mood": set(MOODS),
+    "gesture": set(GESTURES),
+    "pose": set(POSES),
+}
+
 
 # Tool-call XML the LLM emits when invoking a function. mlx-vlm's streaming
 # implementation has a quirk where this raw XML leaks into the `content`
@@ -330,6 +347,15 @@ async def entrypoint(ctx):
         )
 
     def _publish_cue(kind: str, value: str):
+        # Drop cues outside the canonical vocabulary so the UI doesn't
+        # call setMood("playful") and TalkingHead doesn't throw
+        # "Unknown mood". Logged at INFO so we can spot the LLM
+        # ad-libbing if it gets common (then update the prompt /
+        # vocabulary).
+        valid = _VALID_CUE_VALUES.get(kind)
+        if valid is not None and value not in valid:
+            logger.info("dropping unknown cue: %s=%s", kind, value)
+            return
         _publish({"type": kind, "value": value})
 
     # Wire tool start/end/error events to the same DataChannel pipe so
@@ -458,6 +484,12 @@ async def entrypoint(ctx):
         tts=tts_engine,
     )
 
+    # ProactiveSpeaker handle, populated AFTER session.start() (so we have
+    # session state to read) and only when identity.proactive=True. Held
+    # in a closure-captured variable so the conversation_item_added
+    # handler can call note_user_turn() without an additional registry.
+    proactive_speaker: ProactiveSpeaker | None = None
+
     # ── Event handlers ──────────────────────────────────────────────────
     @ctx.room.on("data_received")
     def on_data_received(packet):
@@ -475,6 +507,11 @@ async def entrypoint(ctx):
         if not text:
             return
         logger.info("USER_TEXT -> LLM | text=%r", text)
+        # Typed input counts as a user turn — reset the silence clock so
+        # the proactive speaker doesn't fire a check-in on a user who
+        # just chose to type instead of speak.
+        if proactive_speaker is not None:
+            proactive_speaker.note_user_turn()
         asyncio.ensure_future(session.generate_reply(user_input=text))
 
     @ctx.room.on("track_published")
@@ -519,6 +556,16 @@ async def entrypoint(ctx):
         # Pull text once for both transcript-write and memory-buffer paths.
         text = (msg.text_content or "").strip()
 
+        # Synthetic prompts (initial greeting kickoff + ProactiveSpeaker
+        # nudges) are out-of-band instructions to the LLM, not actual
+        # user input. They MUST NOT land in the transcripts table or
+        # the long-term memory buffer — otherwise next session's
+        # RECENT CONVERSATION block reads them back as "Friend:" lines
+        # and the LLM gets confused. Single is_synthetic_user_message
+        # check covers both patterns.
+        if msg.role == "user" and is_synthetic_user_message(text):
+            return
+
         # Short-term memory: persist BOTH sides verbatim so the next
         # session can recall them. Strip cue tags from assistant text so
         # we don't store "[mood:happy][gesture:handup] hey!" — the user
@@ -552,6 +599,12 @@ async def entrypoint(ctx):
             user_turn_buffer.append({"role": "user", "content": text})
             if len(user_turn_buffer) >= USER_TURN_BATCH_SIZE:
                 asyncio.ensure_future(_flush_memory_batch("batch full"))
+
+        # Reset ProactiveSpeaker's silence clock on every REAL user turn
+        # (synthetic prompts already returned above). Without this, the
+        # speaker would keep firing while the user is mid-conversation.
+        if msg.role == "user" and text and proactive_speaker is not None:
+            proactive_speaker.note_user_turn()
 
         # Pipeline metrics → UI pill
         if not hasattr(msg, "metrics") or not msg.metrics:
@@ -605,8 +658,41 @@ async def entrypoint(ctx):
     # ── Ambient affect watcher ──────────────────────────────────────────
     # Optional: only runs when VLM is configured. Reads frames from
     # agent._last_image_url, idle-gates against AgentSession state.
+    # We hold the watcher so ProactiveSpeaker can read get_last_mood().
+    watcher = None
     if config.vlm_base_url:
-        await _start_vision_watcher(config, session, agent, _publish_cue, ctx)
+        watcher = await _start_vision_watcher(
+            config, session, agent, _publish_cue, ctx,
+        )
+
+    # ── Proactive speaker ───────────────────────────────────────────────
+    # Per-avatar opt-in. When enabled, the speaker watches session state
+    # in the background and fires soft check-ins after sustained silence
+    # or a held non-neutral camera mood. Disciplined heavily — see
+    # ProactiveConfig defaults.
+    if identity.proactive:
+        get_states = lambda: (  # noqa: E731
+            str(getattr(session, "user_state", "listening")),
+            str(getattr(session, "agent_state", "listening")),
+        )
+        get_last_mood = (
+            watcher.get_last_mood if watcher is not None
+            else (lambda: (None, 0.0))
+        )
+
+        def _fire_nudge(prompt: str) -> None:
+            # Fire-and-forget so the proactive loop never awaits the LLM
+            # call (which would block the next tick / shutdown).
+            asyncio.ensure_future(session.generate_reply(user_input=prompt))
+
+        proactive_speaker = ProactiveSpeaker(
+            config=ProactiveConfig(),
+            get_states=get_states,
+            get_last_mood=get_last_mood,
+            fire=_fire_nudge,
+        )
+        await proactive_speaker.start()
+        ctx.add_shutdown_callback(proactive_speaker.stop)
 
     # Flush any unflushed user-turn batch when the session ends, so we
     # don't lose the tail of the conversation if the user disconnects
@@ -625,11 +711,14 @@ async def entrypoint(ctx):
     )
 
 
-async def _start_vision_watcher(config, session, agent, publish_cue, ctx):
+async def _start_vision_watcher(config, session, agent, publish_cue, ctx) -> VisionWatcher:
     """Spin up the ambient affect watcher and register its shutdown.
 
     Lifted out of entrypoint() because the idle-gate state-tracking is
     chunky and unrelated to the rest of the session setup.
+
+    Returns the started watcher so callers (currently ProactiveSpeaker)
+    can read its `get_last_mood()` snapshot.
     """
     # Cache last seen state pair so we only log when it changes.
     state_cache = {"u": None, "a": None}
@@ -677,6 +766,9 @@ async def _start_vision_watcher(config, session, agent, publish_cue, ctx):
         await watcher.stop()
 
     ctx.add_shutdown_callback(_shutdown_watcher)
+    # Returned to entrypoint() so ProactiveSpeaker can wire its
+    # mood-trigger to watcher.get_last_mood().
+    return watcher
 
 
 if __name__ == "__main__":
