@@ -46,6 +46,11 @@ export interface SessionSetup {
   // backend so the avatar will break silence and check in on the user.
   // Off by default — quiet companion mode is the safer baseline.
   proactive: boolean;
+  // Per-avatar toggle for the ambient mood watcher (the small VLM that
+  // reads facial expressions when camera is on). On by default to mirror
+  // historical behavior; turn off when you don't want passive analysis
+  // of your face but still want the camera available for chat.
+  vision_watcher: boolean;
 }
 
 export interface TokenRequest extends Omit<SessionSetup, 'voice'> {
