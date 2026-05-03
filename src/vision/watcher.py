@@ -105,6 +105,19 @@ class VisionWatcher:
             self._session = None
         logger.info("VisionWatcher stopped")
 
+    def get_last_mood(self) -> tuple[Optional[str], float]:
+        """Snapshot of the last emitted mood + the monotonic timestamp
+        when it was first detected (i.e. how long the user has held
+        this mood). Returns (None, 0.0) when no mood has been emitted
+        yet — caller should treat that as "no signal".
+
+        Read-only accessor used by ProactiveSpeaker to gate its mood-
+        based check-in trigger. Doesn't take the lock — these two
+        attributes are written together inside _maybe_emit and a torn
+        read just means a one-tick race, which is harmless.
+        """
+        return (self._last_mood, self._last_change_t)
+
     async def _run(self) -> None:
         try:
             while True:
