@@ -276,26 +276,42 @@ export function AvatarEditor({
               </div>
             </div>
 
-            {/* Per-avatar opt-in: when on, the agent will softly check
-                in on the user during silences and react to camera mood
-                shifts. Heavily gated server-side (see proactive.py).
-                Default off — chatty companions are an opt-in choice. */}
+            {/* Behaviors row — per-avatar opt-in toggles for the things
+                the agent does on its own (without an explicit user turn).
+                Each one has clear "what it does" tooltip text. */}
             <div className="form-field span-2">
-              <label>Personality</label>
-              <button
-                type="button"
-                className={`tool-chip${setup.proactive ? ' on' : ''}`}
-                title={
-                  'When on, the avatar will gently break silence with a soft '
-                  + 'check-in or react to your mood on camera. Limited to a '
-                  + 'few times per session so it never feels pushy.'
-                }
-                aria-pressed={setup.proactive}
-                onClick={() => onChange({ proactive: !setup.proactive })}
-              >
-                <span className="tool-check" aria-hidden />
-                Proactive — speak first when you're quiet
-              </button>
+              <label>Behaviors</label>
+              <div className="tool-chips">
+                <button
+                  type="button"
+                  className={`tool-chip${setup.proactive ? ' on' : ''}`}
+                  title={
+                    'When on, the avatar will gently break silence with a soft '
+                    + 'check-in or react to your mood on camera. Limited to a '
+                    + 'few times per session so it never feels pushy.'
+                  }
+                  aria-pressed={setup.proactive}
+                  onClick={() => onChange({ proactive: !setup.proactive })}
+                >
+                  <span className="tool-check" aria-hidden />
+                  Proactive — speak first when you're quiet
+                </button>
+                <button
+                  type="button"
+                  className={`tool-chip${setup.vision_watcher ? ' on' : ''}`}
+                  title={
+                    'When on, the avatar passively reads your facial '
+                    + 'expression on camera and adjusts its own mood. Off = '
+                    + 'camera still works for the avatar to see you when you '
+                    + "ask, but no passive mood analysis."
+                  }
+                  aria-pressed={setup.vision_watcher}
+                  onClick={() => onChange({ vision_watcher: !setup.vision_watcher })}
+                >
+                  <span className="tool-check" aria-hidden />
+                  Mood awareness — read facial expressions on camera
+                </button>
+              </div>
             </div>
 
           </div>
