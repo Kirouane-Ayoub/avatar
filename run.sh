@@ -77,7 +77,12 @@ start_llm() {
     # Hosted via mlx_vlm.server (not mlx_lm.server) so the same chat endpoint
     # also handles image_url content parts. Works for both VL models (e.g.
     # Qwen3.6-27B) and text-only models — mlx-vlm is a superset of mlx-lm.
-    LLM_ARGS=(--host 0.0.0.0 --model "$LLM_MODEL" --port "$LLM_PORT")
+    # Bind loopback only — Docker on macOS routes host.docker.internal to
+    # the host's 127.0.0.1, so containers still reach this server, but
+    # peers on the LAN (coffee-shop wifi, hotspot) cannot. The MLX server
+    # has no auth — leaving it on 0.0.0.0 lets anyone on the network use
+    # the LLM for free or DOS it.
+    LLM_ARGS=(--host 127.0.0.1 --model "$LLM_MODEL" --port "$LLM_PORT")
     if [ -n "$LLM_KV_BITS" ] && [ "$LLM_KV_BITS" != "off" ]; then
         LLM_ARGS+=(--kv-bits "$LLM_KV_BITS" --kv-quant-scheme "$LLM_KV_QUANT_SCHEME")
         echo "[LLM] Starting mlx-vlm server: $LLM_MODEL on port $LLM_PORT (KV: ${LLM_KV_BITS}-bit ${LLM_KV_QUANT_SCHEME})"
@@ -124,7 +129,9 @@ start_orpheus() {
         return 1
     fi
     echo "[Orpheus] Starting mlx-audio server on port $ORPHEUS_PORT"
-    mlx_audio.server --host 0.0.0.0 --port "$ORPHEUS_PORT" \
+    # Loopback only — same reasoning as the LLM server. Containers reach
+    # this via host.docker.internal which resolves to the host's loopback.
+    mlx_audio.server --host 127.0.0.1 --port "$ORPHEUS_PORT" \
         > /tmp/liva-orpheus.log 2>&1 &
     echo $! > "$ORPHEUS_PID_FILE"
     echo "[Orpheus] Started (PID $!), waiting for server..."
@@ -167,7 +174,8 @@ start_vlm() {
         echo "   even though MLX runs the model itself.)"
         return 1
     fi
-    VLM_ARGS=(--host 0.0.0.0 --port "$VLM_PORT" --model "$VLM_MODEL")
+    # Loopback only — see start_llm comment.
+    VLM_ARGS=(--host 127.0.0.1 --port "$VLM_PORT" --model "$VLM_MODEL")
     if [ -n "$VLM_KV_BITS" ] && [ "$VLM_KV_BITS" != "off" ]; then
         VLM_ARGS+=(--kv-bits "$VLM_KV_BITS" --kv-quant-scheme "$VLM_KV_QUANT_SCHEME")
         echo "[VLM] Starting mlx-vlm server on port $VLM_PORT (model: $VLM_MODEL, KV: ${VLM_KV_BITS}-bit ${VLM_KV_QUANT_SCHEME})"
