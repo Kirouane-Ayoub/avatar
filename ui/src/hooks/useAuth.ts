@@ -23,7 +23,7 @@ export interface AuthState {
   logout: () => Promise<void>;
   // Permanently delete the current user + all their memories. Drops
   // localStorage on success so the app falls back to LoginScreen.
-  deleteAccount: () => Promise<void>;
+  deleteAccount: (password: string) => Promise<void>;
   // Surface profile updates back into auth state so the LiveKit /api/token
   // response (which includes the latest user row) can refresh display
   // immediately without an extra /api/me round-trip.
@@ -107,9 +107,9 @@ export function useAuth(): AuthState {
     setUser(null);
   }, [token]);
 
-  const deleteAccount = useCallback(async () => {
+  const deleteAccount = useCallback(async (password: string) => {
     if (!token) return;
-    await apiDeleteAccount(token);
+    await apiDeleteAccount(token, password);
     // Same teardown as logout — token is now useless server-side anyway.
     localStorage.removeItem(TOKEN_KEY);
     setTokenState(null);
