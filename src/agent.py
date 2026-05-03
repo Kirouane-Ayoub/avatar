@@ -28,13 +28,32 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# When LK_OPENAI_DEBUG=1, livekit-agents logs the full chat.completions.create
-# payload (chat_ctx, tool_schemas, tool_choice) at DEBUG level. The default
-# log level is INFO so the entry never appears unless we bump this logger.
-# Narrow exception to the no-os.getenv-outside-config rule: this is purely
-# diagnostic plumbing for a third-party debug flag — not config used by code.
-if os.getenv("LK_OPENAI_DEBUG"):
+# When LK_OPENAI_DEBUG=1 (env), livekit-agents logs the full
+# chat.completions.create payload (chat_ctx, tool_schemas, tool_choice)
+# at DEBUG level. Useful for tracing tool misfires or image injection,
+# verbose otherwise — default is INFO. Narrow exception to the
+# no-os.getenv-outside-config rule: this is diagnostic plumbing for a
+# third-party debug flag, not config used by code.
+if os.getenv("LK_OPENAI_DEBUG") == "1":
     logging.getLogger("livekit.agents").setLevel(logging.DEBUG)
+
+
+# Suppress the two livekit-agents deprecation warnings that fire on EVERY
+# session start. Both refer to APIs we're using deliberately — see comments
+# in the AgentSession ctor below. Leaving them in the log makes any
+# `grep -i error|warn` scan look noisy with non-actionable hits.
+class _SuppressKnownDeprecations(logging.Filter):
+    _NEEDLES = (
+        "preemptive_generation is deprecated",
+        "metrics_collected is deprecated",
+    )
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        return not any(n in msg for n in self._NEEDLES)
+
+
+logging.getLogger("livekit.agents").addFilter(_SuppressKnownDeprecations())
 
 from livekit import rtc  # noqa: E402
 from livekit.agents import (  # noqa: E402
@@ -52,7 +71,7 @@ from livekit.agents.utils.images import (  # noqa: E402
 )
 from livekit.plugins import openai, silero  # noqa: E402
 
-from auth import SessionIdentity, init_db  # noqa: E402
+from auth import SessionIdentity, UnknownAvatarError, init_db  # noqa: E402
 from config import Config  # noqa: E402
 from cues import GESTURES, MOODS, POSES  # noqa: E402
 from llm import build_chat_llm, build_system_prompt  # noqa: E402
@@ -82,6 +101,27 @@ logger = logging.getLogger("voice-agent")
 # (stripping cues from assistant text before it goes into memory).
 CUE_RE = re.compile(r"\[\s*(mood|gesture|pose)\s*:\s*([a-zA-Z_]+)\s*\]", re.IGNORECASE)
 ANY_BRACKET_RE = re.compile(r"\[[^\]]{0,40}\]")
+
+
+# Conversation content is PII (memories about health, relationships, etc.).
+# By default we log only the length + a short preview so log shippers
+# (Datadog, journald → syslog, etc.) don't carry full transcripts off-box.
+# Set LOG_USER_TEXT=1 to inline full text for local debugging — never set
+# this in any deployment whose logs leave the host.
+_LOG_USER_TEXT = os.getenv("LOG_USER_TEXT") == "1"
+_PREVIEW_CHARS = 40
+
+
+def _redact(text: str) -> str:
+    """Format a user/assistant text snippet for logging. Full text only
+    when LOG_USER_TEXT=1; otherwise an N-char preview + length."""
+    if not text:
+        return "''"
+    if _LOG_USER_TEXT:
+        return repr(text)
+    head = text[:_PREVIEW_CHARS]
+    suffix = "…" if len(text) > _PREVIEW_CHARS else ""
+    return f"{head!r}{suffix} (len={len(text)})"
 
 # Canonical cue vocabularies, indexed by tag kind. The LLM occasionally
 # ad-libs values outside this set (we observed `mood:playful`) which the
@@ -229,9 +269,8 @@ class VoiceAgent(Agent):
         the LLM processes the turn. No-op when camera is off."""
         raw_text = (new_message.text_content or "").strip()
         logger.info(
-            "USER_TURN -> LLM | text=%r | len=%d | has_image=%s",
-            raw_text,
-            len(raw_text),
+            "USER_TURN -> LLM | text=%s | has_image=%s",
+            _redact(raw_text),
             self._last_image_url is not None,
         )
         if self._last_image_url is None:
@@ -265,7 +304,15 @@ async def entrypoint(ctx):
     # validating ownership). SessionIdentity does the DB lookup +
     # wizard-fallback merging.
     participant = await ctx.wait_for_participant()
-    identity = SessionIdentity.from_participant(participant, db=db)
+    try:
+        identity = SessionIdentity.from_participant(participant, db=db)
+    except UnknownAvatarError as e:
+        # Avatar deleted between token issue and session start (or token
+        # forged). Disconnect cleanly — running with a placeholder persona
+        # would honor whatever wizard metadata the client supplied.
+        logger.error("entrypoint: %s", e)
+        ctx.shutdown(reason="unknown avatar")
+        return
 
     # Voice resolution: explicit voice from the wizard wins; otherwise
     # body-based default for the language. stt_language_for derives the
@@ -506,7 +553,7 @@ async def entrypoint(ctx):
         text = (payload.get("text") or "").strip() if isinstance(payload, dict) else ""
         if not text:
             return
-        logger.info("USER_TEXT -> LLM | text=%r", text)
+        logger.info("USER_TEXT -> LLM | text=%s", _redact(text))
         # Typed input counts as a user turn — reset the silence clock so
         # the proactive speaker doesn't fire a check-in on a user who
         # just chose to type instead of speak.
