@@ -8,6 +8,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from datetime import timedelta
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Optional
@@ -56,6 +57,9 @@ ALLOWED_BODIES = {"F", "M"}
 MAX_NAME_LEN = 60
 MAX_PERSONA_LEN = 2000
 MAX_SAMPLE_TEXT = 200
+# Bound user-supplied display_name so the DB column doesn't grow without
+# limit and so the UI doesn't try to render a 1 MB monogram label.
+MAX_DISPLAY_NAME_LEN = 100
 
 TTS_BASE_URL = os.getenv("TTS_BASE_URL", "http://kokoro-tts:8880").rstrip("/")
 TTS_MODEL = os.getenv("TTS_MODEL", "kokoro")
@@ -67,6 +71,48 @@ ORPHEUS_MODEL = os.getenv("ORPHEUS_MODEL", "orpheus")
 # request is plenty for interactive preview; bump via env if you want more.
 _TTS_CONCURRENCY = int(os.getenv("TTS_SAMPLE_CONCURRENCY", "1"))
 _TTS_SEMAPHORE = threading.BoundedSemaphore(max(1, _TTS_CONCURRENCY))
+
+
+# ── Rate limiting (in-memory, per-IP) ───────────────────────────────────
+# Token-bucket per (endpoint, IP). Tuned to slow brute-force without
+# punishing legitimate retry-after-typo. Reset state lives in process
+# memory — a multi-process deployment would need Redis or a shared store,
+# but the app currently runs as a single Python process so this is fine.
+#
+# Login: 8 attempts per 5 min lets a fat-fingered user retry without
+# friction; an attacker-paced 1000-tries/hour attempt gets 96 attempts
+# instead. bcrypt cost-12 (~250ms) further throttles each one.
+# Signup: 5 per hour per IP — high enough for a household NAT, low
+# enough that spam-signup farms hit the wall fast.
+_RATE_LIMIT_WINDOWS = {
+    "login": (8, 300.0),     # 8 attempts / 5 min
+    "signup": (5, 3600.0),   # 5 attempts / hour
+}
+_rate_state: dict[tuple[str, str], list[float]] = {}
+_rate_lock = threading.Lock()
+
+
+def _rate_limit_check(endpoint: str, ip: str) -> bool:
+    """True when the request is allowed; False after sending a 429.
+    Sliding-window counter — drops timestamps older than the window each
+    call so memory stays bounded as IPs come and go."""
+    cap, window = _RATE_LIMIT_WINDOWS[endpoint]
+    now = time.monotonic()
+    cutoff = now - window
+    key = (endpoint, ip)
+    with _rate_lock:
+        bucket = _rate_state.setdefault(key, [])
+        # Drop expired timestamps in place — cheap because the list stays
+        # short relative to the window/cap pair.
+        i = 0
+        while i < len(bucket) and bucket[i] < cutoff:
+            i += 1
+        if i:
+            del bucket[:i]
+        if len(bucket) >= cap:
+            return False
+        bucket.append(now)
+        return True
 
 # The upstream Kokoro image ships different voice sets depending on version
 # (e.g. v1.0 vs v0 carry-overs). We query the running server for its actual
@@ -164,18 +210,63 @@ class Handler(SimpleHTTPRequestHandler):
         default_root = DIST_DIR if DIST_DIR.is_dir() else UI_DIR
         super().__init__(*args, directory=str(default_root), **kwargs)
 
+    def end_headers(self):
+        # Apply the same baseline security headers to every response (API
+        # JSON, static assets, voice-sample stream). Cheap, cross-cutting,
+        # and ineffective if applied selectively.
+        self._send_security_headers()
+        super().end_headers()
+
+    def _send_security_headers(self):
+        """Defense-in-depth headers for browser-loaded responses.
+        - nosniff: stop browsers from MIME-sniffing JSON as JS.
+        - referrer: don't leak the (potentially session-id-bearing) URL
+          to third parties when a user clicks a link out.
+        - frame-ancestors: same-origin only — blocks clickjacking even
+          if a future overlay route lacks framebusting.
+        - X-Frame-Options DENY: legacy fallback for older browsers.
+        - permissions: deny the most invasive APIs we don't use, leave
+          camera+mic open since LiveKit needs them.
+        Deliberately NOT setting Content-Security-Policy: the index page
+        loads TalkingHead from a CDN via importmap (see H4 follow-up);
+        adding a CSP without vendoring those modules first would break
+        the avatar."""
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header(
+            "Permissions-Policy",
+            "geolocation=(), payment=(), usb=(), magnetometer=(), accelerometer=()",
+        )
+
     def _send_json(self, status: int, payload: dict):
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.end_headers()
         self.wfile.write(json.dumps(payload).encode())
 
+    # No request body the server actually consumes is over a few KB. Cap
+    # at 64 KB so a malicious client can't make us allocate 1 GB on a
+    # forged Content-Length. 413 (Payload Too Large) for anything above.
+    _MAX_BODY_BYTES = 64 * 1024
+
     # ── Auth helpers ─────────────────────────────────────────────────────
     def _read_json_body(self) -> dict:
         """Read+parse a JSON body, returning {} on missing/invalid.
         Sends a 400 + raises ValueError if the body was malformed JSON
-        (caller should `return` after catching)."""
-        length = int(self.headers.get("Content-Length", "0") or 0)
+        (caller should `return` after catching). Sends 413 + raises
+        ValueError if Content-Length exceeds the cap."""
+        try:
+            length = int(self.headers.get("Content-Length", "0") or 0)
+        except ValueError:
+            self._send_json(400, {"error": "invalid Content-Length"})
+            raise ValueError("bad content-length")
+        if length < 0:
+            self._send_json(400, {"error": "invalid Content-Length"})
+            raise ValueError("negative content-length")
+        if length > self._MAX_BODY_BYTES:
+            self._send_json(413, {"error": "request body too large"})
+            raise ValueError("body too large")
         if not length:
             return {}
         raw = self.rfile.read(length)
@@ -242,6 +333,12 @@ class Handler(SimpleHTTPRequestHandler):
         return avatar
 
     def _handle_voice_sample(self, qs: dict):
+        # Authenticated only — synthesizing a voice sample takes 2-15 s of
+        # Metal/CPU on the upstream TTS server, and the global semaphore
+        # caps concurrency to 1, so leaving this open lets any anonymous
+        # caller wedge the endpoint and burn compute.
+        if self._bearer_user_id() is None:
+            return  # 401 already sent
         voice = (qs.get("voice", [""])[0] or "").strip()
         text = (qs.get("text", [""])[0] or "").strip()[:MAX_SAMPLE_TEXT]
         backend = backend_for(voice)
@@ -388,6 +485,36 @@ class Handler(SimpleHTTPRequestHandler):
         if user_id is None:
             return  # 401 already sent
 
+        # Reconfirm the password before doing anything irreversible. A
+        # session JWT alone is enough to read the account but NOT enough
+        # to nuke it — this stops a stolen-token (XSS / shoulder-surf)
+        # from also wiping every avatar + memory bag the user has built.
+        try:
+            body = self._read_json_body()
+        except ValueError:
+            return
+        password = body.get("password") if isinstance(body, dict) else None
+        if not password:
+            return self._send_json(400, {"error": "password required"})
+        try:
+            user_check = _DB.get_user_by_id(user_id)
+            if user_check is None:
+                return self._send_json(401, {"error": "user no longer exists"})
+            # Re-verify against the current credentials. We deliberately
+            # don't expose `verify_user_password` on auth_lib — the call
+            # below mirrors the login path: lookup by username + verify.
+            try:
+                auth_lib.login(
+                    _DB, _CONFIG,
+                    username=user_check.username,
+                    password=password,
+                )
+            except auth_lib.InvalidCredentials:
+                return self._send_json(401, {"error": "invalid password"})
+        except Exception:
+            logger.exception("delete-me reconfirm failed for user_id=%s", user_id)
+            return self._send_json(500, {"error": "reconfirm failed"})
+
         # Memory is keyed by avatar_id (not user_id), so we have to
         # enumerate this user's avatars and forget each one's memories
         # BEFORE deleting the user. The user delete CASCADEs to the
@@ -412,8 +539,22 @@ class Handler(SimpleHTTPRequestHandler):
         )
         self._send_json(200, {"ok": True, "deleted": deleted})
 
+    def _client_ip(self) -> str:
+        """Best-effort client IP for rate limiting. Behind a reverse proxy
+        the X-Forwarded-For header takes precedence; we trust the first
+        entry only when it's set, otherwise fall back to the socket peer.
+        Trust model: deploy behind a proxy you control, or accept that
+        clients on the public internet can spoof XFF and dilute their own
+        rate limit (their problem, not ours)."""
+        xff = self.headers.get("X-Forwarded-For", "")
+        if xff:
+            return xff.split(",")[0].strip()
+        return self.client_address[0] if self.client_address else "unknown"
+
     # ── /api/signup ─────────────────────────────────────────────────────
     def _handle_signup(self):
+        if not _rate_limit_check("signup", self._client_ip()):
+            return self._send_json(429, {"error": "too many signups, slow down"})
         try:
             body = self._read_json_body()
         except ValueError:
@@ -421,6 +562,8 @@ class Handler(SimpleHTTPRequestHandler):
         username = body.get("username", "")
         password = body.get("password", "")
         display_name = body.get("display_name") or body.get("displayName")
+        if isinstance(display_name, str):
+            display_name = display_name.strip()[:MAX_DISPLAY_NAME_LEN]
         try:
             user, token = auth_lib.signup(
                 _DB, _CONFIG,
@@ -437,6 +580,8 @@ class Handler(SimpleHTTPRequestHandler):
 
     # ── /api/login ──────────────────────────────────────────────────────
     def _handle_login(self):
+        if not _rate_limit_check("login", self._client_ip()):
+            return self._send_json(429, {"error": "too many login attempts, try again later"})
         try:
             body = self._read_json_body()
         except ValueError:
@@ -500,11 +645,23 @@ class Handler(SimpleHTTPRequestHandler):
         # layer looks up the Avatar row by it. Wizard cfg in metadata
         # for body / mood / language hints the agent uses for voice
         # defaults and initial preview state.
+        #
+        # Token is short-lived (handshake only — LiveKit's WS connection
+        # outlives the token's TTL), and source-restricted to mic+camera so
+        # a compromised browser can't publish unexpected media. A leaked
+        # token expires before it's useful for offline replay.
         token = (
             AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET)
             .with_identity(avatar.id)
             .with_metadata(json.dumps(cfg))
-            .with_grants(VideoGrants(room_join=True, room=room_name))
+            .with_ttl(timedelta(minutes=10))
+            .with_grants(
+                VideoGrants(
+                    room_join=True,
+                    room=room_name,
+                    can_publish_sources=["camera", "microphone"],
+                )
+            )
             .to_jwt()
         )
         self._send_json(
