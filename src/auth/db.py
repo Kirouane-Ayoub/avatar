@@ -34,6 +34,7 @@ from datetime import datetime
 from typing import Optional
 
 from psycopg.rows import dict_row
+from psycopg.types.json import Json
 from psycopg_pool import ConnectionPool
 
 from config import Config
@@ -53,18 +54,47 @@ logger = logging.getLogger("db")
 #
 # `mood` is intentionally NOT on avatars — it's a transient UI preview
 # value during the wizard, then the LLM/watcher take over per-turn.
+# Per-avatar transcript retention cap. Opportunistically pruned on each
+# INSERT so the table is bounded as the user base grows. 200 rows ≈ 100
+# user turns + 100 assistant turns — far more than the 6-turn recall
+# window needs, but enough headroom for ad-hoc debugging / future
+# features that want a deeper trail.
+TRANSCRIPT_RETENTION = 200
+
+
+# Explicit column lists for every read/write. NEVER use `SELECT *` here:
+# - `*` ships every column over the wire whether we use it or not (worst
+#   on `users` where we'd otherwise leak `password_hash` into every
+#   row dict — see _USER_PUBLIC vs _USER_WITH_HASH).
+# - Schema additions silently expand the result set, which can break
+#   row-to-dataclass mapping in subtle ways the type-checker won't catch.
+# - Explicit columns make it possible to grep "where do we read X" and
+#   to enable index-only scans later if a hot query gets that narrow.
+#
+# Order matters: it must match the dataclass field order in _row_to_*
+# (we read by key, but the convention keeps reviewers honest).
+_USER_PUBLIC = "id, username, display_name, created_at, updated_at"
+_AVATAR_COLS = (
+    "id, user_id, name, persona, voice, avatar_key, "
+    "tools_json, created_at, updated_at, last_used_at"
+)
+_TRANSCRIPT_COLS = "id, avatar_id, role, text, created_at"
+
+
 _SCHEMA = """
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 CREATE TABLE IF NOT EXISTS users (
     id              UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    -- UNIQUE NOT NULL implicitly creates a unique index — no separate
+    -- index needed. (We previously had a redundant `users_username_idx`
+    -- here; the migration block below drops it on existing installs.)
     username        TEXT         UNIQUE NOT NULL,
     password_hash   TEXT         NOT NULL,
     display_name    TEXT         NOT NULL,
     created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS users_username_idx ON users (username);
 
 -- Drop the legacy per-user profile columns. Their data moved to the
 -- avatars table (where it conceptually belongs); existing rows under
@@ -86,13 +116,14 @@ CREATE TABLE IF NOT EXISTS avatars (
     persona         TEXT,
     voice           TEXT,
     avatar_key      TEXT,                            -- 3D model key from ui/data/avatars
-    tools_json      TEXT,                            -- JSON array of enabled tool ids
+    tools_json      JSONB,                           -- JSON array of enabled tool ids
     created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
     -- Touched on every session start; lets the UI sort "recently chatted with"
     last_used_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS avatars_user_id_idx ON avatars (user_id);
+-- (avatars_user_id_idx is redundant — the composite below covers it via
+-- the leftmost-prefix rule. Migration drops it on existing installs.)
 CREATE INDEX IF NOT EXISTS avatars_last_used_idx ON avatars (user_id, last_used_at DESC);
 
 -- Short-term memory: verbatim transcript per (avatar, turn). Used to
@@ -110,9 +141,33 @@ CREATE TABLE IF NOT EXISTS transcripts (
     text            TEXT         NOT NULL,
     created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
--- Index drives the "last N for this avatar" query on every session start.
+-- Index drives the "last N for this avatar" query on every session start
+-- AND the FK cascade lookup when an avatar is deleted.
 CREATE INDEX IF NOT EXISTS transcripts_avatar_ts_idx
     ON transcripts (avatar_id, created_at DESC);
+
+-- ── Migrations from earlier schema versions (idempotent) ───────────────
+-- Drop indexes that turned out to be redundant. UNIQUE constraints and
+-- composite indexes (via leftmost-prefix) cover the same lookups.
+DROP INDEX IF EXISTS users_username_idx;
+DROP INDEX IF EXISTS avatars_user_id_idx;
+
+-- Convert avatars.tools_json from TEXT to JSONB. Wrapped in a DO block
+-- so it only fires when the column is still TEXT — re-running on JSONB
+-- would error. Empty strings become NULL (JSONB can't parse "").
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'avatars'
+      AND column_name = 'tools_json'
+      AND data_type = 'text'
+  ) THEN
+    ALTER TABLE avatars ALTER COLUMN tools_json TYPE JSONB
+      USING NULLIF(tools_json, '')::jsonb;
+  END IF;
+END
+$$;
 """
 
 
@@ -203,7 +258,10 @@ class Db:
     def get_user_by_id(self, user_id: str) -> Optional[User]:
         with self._pool.connection() as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT * FROM users WHERE id = %s", (user_id,))
+                cur.execute(
+                    f"SELECT {_USER_PUBLIC} FROM users WHERE id = %s",
+                    (user_id,),
+                )
                 row = cur.fetchone()
                 return _row_to_user(row) if row else None
 
@@ -211,7 +269,8 @@ class Db:
         with self._pool.connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT * FROM users WHERE username = %s", (username.lower(),)
+                    f"SELECT {_USER_PUBLIC} FROM users WHERE username = %s",
+                    (username.lower(),),
                 )
                 row = cur.fetchone()
                 return _row_to_user(row) if row else None
@@ -229,10 +288,10 @@ class Db:
         with self._pool.connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    """
+                    f"""
                     INSERT INTO users (id, username, password_hash, display_name)
                     VALUES (%s, %s, %s, %s)
-                    RETURNING *
+                    RETURNING {_USER_PUBLIC}
                     """,
                     (new_id, username.lower(), password_hash, display_name),
                 )
@@ -261,8 +320,8 @@ class Db:
         with self._pool.connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "UPDATE users SET display_name = %s, updated_at = NOW() "
-                    "WHERE id = %s RETURNING *",
+                    f"UPDATE users SET display_name = %s, updated_at = NOW() "
+                    f"WHERE id = %s RETURNING {_USER_PUBLIC}",
                     (display_name, user_id),
                 )
                 row = cur.fetchone()
@@ -275,7 +334,8 @@ class Db:
         with self._pool.connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT * FROM avatars WHERE user_id = %s ORDER BY last_used_at DESC",
+                    f"SELECT {_AVATAR_COLS} FROM avatars "
+                    f"WHERE user_id = %s ORDER BY last_used_at DESC",
                     (user_id,),
                 )
                 return [_row_to_avatar(row) for row in cur.fetchall()]
@@ -283,7 +343,10 @@ class Db:
     def get_avatar(self, avatar_id: str) -> Optional[Avatar]:
         with self._pool.connection() as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT * FROM avatars WHERE id = %s", (avatar_id,))
+                cur.execute(
+                    f"SELECT {_AVATAR_COLS} FROM avatars WHERE id = %s",
+                    (avatar_id,),
+                )
                 row = cur.fetchone()
                 return _row_to_avatar(row) if row else None
 
@@ -303,14 +366,18 @@ class Db:
         with self._pool.connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    """
+                    f"""
                     INSERT INTO avatars (user_id, name, persona, voice, avatar_key, tools_json)
                     VALUES (%s, %s, %s, %s, %s, %s)
-                    RETURNING *
+                    RETURNING {_AVATAR_COLS}
                     """,
                     (
                         user_id, name, persona, voice, avatar_key,
-                        json.dumps(tools) if tools is not None else None,
+                        # Json() wraps the list so psycopg sends it to the
+                        # JSONB column with the right type adapter (without
+                        # this, psycopg would try str-cast and Postgres would
+                        # reject the cast).
+                        Json(tools) if tools is not None else None,
                     ),
                 )
                 row = cur.fetchone()
@@ -346,14 +413,17 @@ class Db:
             params.append(avatar_key)
         if tools is not None:
             sets.append("tools_json = %s")
-            params.append(json.dumps(tools))
+            params.append(Json(tools))
         if touch_last_used:
             sets.append("last_used_at = NOW()")
         if not sets:
             return self.get_avatar(avatar_id)
         sets.append("updated_at = NOW()")
         params.append(avatar_id)
-        sql = f"UPDATE avatars SET {', '.join(sets)} WHERE id = %s RETURNING *"
+        sql = (
+            f"UPDATE avatars SET {', '.join(sets)} "
+            f"WHERE id = %s RETURNING {_AVATAR_COLS}"
+        )
         with self._pool.connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(sql, tuple(params))
@@ -377,6 +447,12 @@ class Db:
         BOTH user and assistant turns. Cheap insert; no LLM in the
         path. The row's id auto-increments via BIGSERIAL.
 
+        After the insert, opportunistically prunes the avatar's history
+        to TRANSCRIPT_RETENTION rows so the table is bounded as the user
+        base grows. The prune subquery uses transcripts_avatar_ts_idx
+        with OFFSET to find the cutoff timestamp; under the cap, the
+        subquery returns NULL and the DELETE is a no-op.
+
         Best-effort: a DB hiccup shouldn't break the conversation. The
         agent calls this via `asyncio.to_thread(...)` then ignores any
         exception so the failure doesn't bubble into the voice loop.
@@ -388,6 +464,22 @@ class Db:
                 cur.execute(
                     "INSERT INTO transcripts (avatar_id, role, text) VALUES (%s, %s, %s)",
                     (avatar_id, role, text),
+                )
+                # Cap rows per avatar. Cheap with the index — index seek to
+                # the (TRANSCRIPT_RETENTION)th newest row, then drop everything
+                # older. No-op when the avatar is under cap.
+                cur.execute(
+                    """
+                    DELETE FROM transcripts
+                    WHERE avatar_id = %s
+                      AND created_at < (
+                          SELECT created_at FROM transcripts
+                          WHERE avatar_id = %s
+                          ORDER BY created_at DESC
+                          OFFSET %s LIMIT 1
+                      )
+                    """,
+                    (avatar_id, avatar_id, TRANSCRIPT_RETENTION - 1),
                 )
 
     def recent_transcripts(
@@ -402,8 +494,8 @@ class Db:
         with self._pool.connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT * FROM transcripts WHERE avatar_id = %s "
-                    "ORDER BY created_at DESC LIMIT %s",
+                    f"SELECT {_TRANSCRIPT_COLS} FROM transcripts "
+                    f"WHERE avatar_id = %s ORDER BY created_at DESC LIMIT %s",
                     (avatar_id, limit),
                 )
                 rows = cur.fetchall()
@@ -412,7 +504,9 @@ class Db:
 
 
 def _row_to_user(row: dict) -> User:
-    """Translate a SELECT * row into a typed User."""
+    """Translate a row (columns from _USER_PUBLIC) into a typed User.
+    `password_hash` is NOT in the row — that's fetched via a dedicated
+    query in auth/flows.py only when verifying credentials."""
     return User(
         id=str(row["id"]),
         username=row["username"],
@@ -423,7 +517,7 @@ def _row_to_user(row: dict) -> User:
 
 
 def _row_to_transcript(row: dict) -> Transcript:
-    """Translate a SELECT * row from the transcripts table into a typed Transcript."""
+    """Translate a row (columns from _TRANSCRIPT_COLS) into a typed Transcript."""
     return Transcript(
         id=int(row["id"]),
         avatar_id=str(row["avatar_id"]),
@@ -434,10 +528,19 @@ def _row_to_transcript(row: dict) -> Transcript:
 
 
 def _row_to_avatar(row: dict) -> Avatar:
-    """Translate a SELECT * row from the avatars table into a typed Avatar."""
+    """Translate a row (columns from _AVATAR_COLS) into a typed Avatar.
+
+    `tools_json` is JSONB, so psycopg returns it pre-parsed (list/dict/None).
+    The `json.loads` branch is a backstop for the brief migration window
+    where an existing install hasn't yet hit the TEXT→JSONB ALTER.
+    """
     tools_json = row.get("tools_json")
     tools: list = []
-    if tools_json:
+    if isinstance(tools_json, list):
+        tools = tools_json
+    elif isinstance(tools_json, str) and tools_json:
+        # Pre-migration fallback: column was still TEXT, value is a JSON
+        # string. Decode defensively — bad data shouldn't crash list_avatars.
         try:
             decoded = json.loads(tools_json)
             if isinstance(decoded, list):
