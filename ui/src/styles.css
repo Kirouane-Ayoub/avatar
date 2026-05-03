@@ -1107,6 +1107,18 @@ code {
   color: #71717a;
 }
 .form-footer-info b { color: #c7d2fe; font-weight: 600; font-family: 'SF Mono', monospace; }
+/* Brief success toast above the picker grid after a memory wipe.
+   Auto-clears when the user navigates away — short-lived state, no
+   timer needed. Soft green to read as "ok, done" without alarming. */
+.picker-toast {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(34, 197, 94, 0.12);
+  border: 1px solid rgba(34, 197, 94, 0.25);
+  color: #d1fae5;
+  font-size: 0.78rem;
+}
 .start-btn {
   padding: 0.6rem 1.2rem;
   border: none;
@@ -1747,11 +1759,17 @@ code {
 .picker-card-sub  { color: #71717a; font-size: 0.78rem; margin-top: 2px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-.picker-card-delete {
-  position: absolute; top: 8px; right: 12px; font-size: 0.72rem; opacity: 0;
+/* Card actions row — pinned top-right of each picker card. Hidden until
+   the card is hovered so the cards stay clean at rest. Holds Forget +
+   Delete; the danger-btn modifier on Delete tints it red. */
+.picker-card-actions {
+  position: absolute; top: 8px; right: 12px;
+  display: flex; gap: 10px; align-items: center;
+  font-size: 0.72rem; opacity: 0;
   transition: opacity 0.15s ease;
 }
-.picker-card:hover .picker-card-delete { opacity: 1; }
+.picker-card:hover .picker-card-actions { opacity: 1; }
+.picker-card-action { white-space: nowrap; }
 
 .picker-new {
   flex-direction: column; align-items: center; justify-content: center;
