@@ -31,7 +31,7 @@ interface AuthResponse {
   session_token: string;
 }
 
-// ── Voices / voice-sample (unchanged — public endpoints) ────────────────
+// ── Voices / voice-sample ───────────────────────────────────────────────
 export async function fetchVoices(): Promise<VoiceInfo[]> {
   const res = await fetch('/api/voices');
   if (!res.ok) throw new Error(`voices: HTTP ${res.status}`);
@@ -39,9 +39,24 @@ export async function fetchVoices(): Promise<VoiceInfo[]> {
   return data.voices;
 }
 
-export function voiceSampleUrl(voiceId: string, text: string): string {
+// Fetches an audio blob preview for a voice. Authenticated — synthesis is
+// 2-15 s of upstream Metal/CPU compute, so the endpoint requires a session
+// JWT to keep anonymous callers from burning the TTS server. Token read
+// directly from localStorage to avoid prop-drilling through VoicePicker;
+// the key matches useAuth's TOKEN_KEY.
+export async function fetchVoiceSample(
+  voiceId: string,
+  text: string,
+  signal?: AbortSignal,
+): Promise<Blob> {
   const params = new URLSearchParams({ voice: voiceId, text });
-  return `/api/voice-sample?${params.toString()}`;
+  const token = localStorage.getItem('liva-session-token') || '';
+  const res = await fetch(`/api/voice-sample?${params.toString()}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    signal,
+  });
+  if (!res.ok) throw new Error(`voice-sample: HTTP ${res.status}`);
+  return res.blob();
 }
 
 // ── Auth API ────────────────────────────────────────────────────────────
@@ -89,13 +104,18 @@ export async function fetchMe(token: string): Promise<AuthUser> {
   return data.user;
 }
 
-export async function deleteAccount(token: string): Promise<void> {
+export async function deleteAccount(token: string, password: string): Promise<void> {
   // DELETE /api/me wipes the user row AND every Mem0 memory under
   // their id. The session JWT is then useless — caller is expected
-  // to clear localStorage on a successful response.
+  // to clear localStorage on a successful response. Password is
+  // re-verified server-side: a stolen JWT alone can't nuke the account.
   const res = await fetch('/api/me', {
     method: 'DELETE',
-    headers: { Authorization: `Bearer ${token}` },
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ password }),
   });
   if (!res.ok) {
     const data = (await res.json().catch(() => ({}))) as { error?: string };
