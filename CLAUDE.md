@@ -63,10 +63,11 @@ ollama pull all-minilm   # ~46 MB, 384-dim MiniLM
 
 ```
 src/
-├── agent.py        ← LiveKit job entrypoint (~500 lines, thin glue)
+├── agent.py        ← LiveKit job entrypoint (~700 lines, thin glue)
 ├── config.py       ← Config dataclass — single source of truth for env vars
 ├── cues.py         ← shared mood/gesture/pose vocabulary (LLM + vision both use)
-├── tools.py        ← @function_tool catalogue
+├── tools.py        ← @function_tool catalogue + _log_tool decorator + event sink
+├── proactive.py    ← ProactiveSpeaker — opt-in, decides when avatar breaks silence
 ├── gen_token.py    ← standalone CLI dev-token helper
 ├── auth/           ← signup/login/JWT, DB pool + CRUD, SessionIdentity
 ├── llm/            ← chat LLM client + system prompt assembly
@@ -99,7 +100,9 @@ Anything orthogonal lives in its own package. When in doubt, consult the brief m
 
 **Voices** (`src/tts/voices.py`): Two catalogs. `KOKORO_VOICES` is the single-letter-prefix Kokoro set; `ORPHEUS_VOICES` is the (mostly English) Orpheus set with `stt`/`description` per voice. `backend_for(voice)` returns `"kokoro"` or `"orpheus"` and drives the agent's TTS factory. `stt_language_for(voice_id)` derives the Whisper language: prefix lookup for Kokoro, explicit `stt` field for Orpheus. Mirrored client-side as `ui/src/data/voice_lang.ts:languageFromVoice()` (must contain the same Orpheus voice→language map).
 
-**Tools** (`src/tools.py`): Function tools decorated with `@function_tool`. All async. Weather uses wttr.in (no API key). Tools are passed to the `Agent` constructor.
+**Tools** (`src/tools.py`): Function tools decorated with `@function_tool` + a `@_log_tool` wrapper that fires `TOOL ▶ / TOOL ◀` log lines AND publishes `{type:"tool", op:"start"|"end"|"error"}` events on the `metrics` DataChannel via the `_event_sink` module-level callback (set by `agent.py:set_tool_event_sink`). The UI listens for those events and renders a live "tool running" pill on the avatar stage. Sink is module-level (not ContextVar) because livekit-agents spawns the tool task from a context captured BEFORE we set the sink, so contextvars don't propagate. `_FAKE_TOOL_LATENCY_SEC` (currently 1 s) is an artificial sleep on every stub tool so the pill demos visibly — drop to 0 once real backends land. Tool ids are filtered through `TOOL_CATALOG` in agent.py to produce `tool_ids`, which both feeds the `Agent(tools=...)` constructor AND drives the system-prompt's `TOOLS YOU HAVE:` block (so the LLM is never told about a tool that isn't actually wired).
+
+**Proactive speaker** (`src/proactive.py`): Per-avatar opt-in (`avatars.proactive` BOOLEAN). When enabled, a background asyncio task watches session state and fires soft check-ins via `session.generate_reply(user_input=<SYS-NUDGE prompt>)`. Two triggers: (a) sustained silence (`silence_threshold_s = 25`, requires `agent_state == "listening"`), (b) held non-neutral camera mood from VisionWatcher (`mood_hold_s = 8`). Discipline: `cooldown_s = 45`, `max_check_ins = 5`/session, `mute_window_after_user_turn_s = 5`. Prompt pools are deliberately varied — 8 silence angles + 5 camera-grounded angles + per-mood pools — with a `_recent_templates` deque preventing back-to-back duplicates and a `_CAMERA_GROUNDING_PREFIX` that overrides the system prompt's "only mention camera if asked" rule for camera-aware nudges. Every nudge is wrapped in `(SYS-NUDGE: …)` so `is_synthetic_user_message()` filters it out of transcripts and the long-term memory buffer.
 
 **UI** (`ui/`): React + TypeScript + Vite app. Entry is `ui/index.html` (importmap shell that loads TalkingHead + per-language `lipsync-*` modules from CDN), real app is in `ui/src/`. Three top-level views in `App.tsx`, gated in this order:
 - **Login screen** (`LoginScreen.tsx`) — username + password form, mode toggle for sign-in vs sign-up. Shown when `useAuth` has no validated session token.
@@ -177,7 +180,25 @@ Wrapper at `src/memory/provider.py` (Protocol + `Mem0Provider` + `NullProvider`)
 
 Wired in `agent.py` at two points:
 - **Session start**: `memory.recall(user_id)` → injected into the system prompt via `system_prompt.memory_block(...)` so the avatar knows things from prior sessions before its first reply.
-- **`conversation_item_added` event**: `memory.record_turn(user_id, role, text)` for both user and assistant messages. Cue tags stripped from assistant text first so memory doesn't see `[mood:happy]`. Fact extraction runs async inside Mem0 — does NOT block the next turn. The agent surfaces per-write timing as a `MEM W` metric pill in the UI; recall latency at session start is `MEM R`.
+- **`conversation_item_added` event**: USER messages buffered into `user_turn_buffer` and flushed every 10 turns + at session shutdown via `memory.record_batch(...)`. Assistant turns are NOT memory-buffered (they rarely carry new facts about the user). Cue tags stripped from assistant text. Fact extraction runs async inside Mem0 in a thread — does NOT block the next turn. The agent surfaces per-write timing as a `MEM W` metric pill; recall latency at session start is `MEM R`. Synthetic prompts (greeting, ProactiveSpeaker SYS-NUDGE) are filtered via `is_synthetic_user_message` so they never poison long-term facts.
+
+**Known issue (open):** the small VLM at `:5006` (Qwen3-VL-2B) is too weak to reliably produce JSON facts — `memory.batch -> no facts extracted` is the typical outcome. Routing to the chat LLM at `:8090` was tried and reverted: it queues against chat (mlx-vlm is serial) and breaks the conversation. Real fix is a dedicated 7B extractor server or hosted gpt-4o-mini.
+
+### Short-term memory (transcripts)
+
+Distinct from Mem0's distilled facts. The `transcripts` table stores verbatim turns (role + text + created_at) keyed by `avatar_id`, with cascade delete through avatar/user. At session start the agent fetches the **last 6 turns** via `db.recent_transcripts(avatar_id, 6)` and the prompt assembles them into a `RECENT CONVERSATION:` block via `recent_block()`.
+
+Why 6, not 20: a deeper window biases the model toward repeating its own prior behavior — even when it was wrong (a tool call it skipped, a wrong answer). 6 turns is enough for "we were just talking about X" without giving the model 10 example responses to imitate. The block also has explicit anti-template framing: *"Use this for CONTEXT only. Do NOT treat your prior YOU lines as a template — your current instructions take precedence."*
+
+`record_transcript` is called for both user and assistant turns (cue tags stripped from assistant) and runs an opportunistic prune to `TRANSCRIPT_RETENTION = 200` rows per avatar in the same call — table stays bounded as the user base grows. Synthetic prompts filtered via `is_synthetic_user_message`.
+
+### Per-avatar Forget memory
+
+`POST /api/avatars/<id>/forget` (auth required, ownership verified) does both wipes:
+1. `db.delete_transcripts(avatar_id)` — DELETE FROM transcripts.
+2. `memory.forget(avatar_id)` — Mem0's `delete_all(user_id=avatar_id)`.
+
+Returns `{ok, transcripts_deleted, memory_cleared}`. Avatar row + persona/voice/tools/proactive/vision_watcher all preserved — user keeps the same companion with a clean slate. UI surface: hover any picker card → "Forget memory" link next to "Delete" → confirm dialog → green toast above the grid showing the count wiped. Forget is the right tool when the avatar's memory has gone wrong (poisoned recall, wrong facts) but you don't want to lose the persona you tuned.
 
 ### Auth & multi-user
 
@@ -191,13 +212,17 @@ Boot sequence (UI side):
 3. Logged in → `<AvatarPickerScreen>` (list of saved avatars + "+ New companion"). Click → `<AvatarEditor>` pre-filled from that avatar's row (DB beats wizard defaults).
 4. Start session → `requestToken(setup, sessionJwt)` POSTs to `/api/token` with the bearer header, gets the LiveKit token, joins the room.
 
-Profile persistence: every `/api/token` call also runs `db.update_profile(...)` with whatever the wizard currently shows, so personalization survives across sessions, browsers, devices.
+Profile persistence: every `/api/token` call also runs `db.update_profile(...)` with whatever the wizard currently shows, so personalization survives across sessions, browsers, devices. The editor's `patch()` ALSO PATCHes individual fields (name, persona, voice, avatar_key, tools, proactive, vision_watcher) on every change as fire-and-forget — `/api/token` is the backstop, not the only save path.
+
+**Account delete requires password reconfirmation** as of 2026-05-03. `DELETE /api/me` reads `{password}` from the body and re-runs `auth_lib.login()` against the user's username — a stolen JWT alone is not enough authority for irreversible wipe. The picker's UserMenu deliberately does NOT expose the delete-account action; the only path is through the editor's UserMenu (which has the password modal). One canonical destructive flow.
+
+**Fail-closed identity**: `SessionIdentity.from_participant` raises `UnknownAvatarError` when `participant.identity` doesn't resolve to an avatar row (deleted between token issue + session start, or token forged). `entrypoint()` catches it and calls `ctx.shutdown(reason="unknown avatar")` rather than synthesizing a placeholder identity. Earlier behavior would have run a session under user-supplied wizard metadata the server never validated.
 
 The user-id seam is `src/auth/identity.py:SessionIdentity.from_participant(participant, db)`:
-1. `participant.identity` → user_id (the DB UUID).
-2. `db.get_user_by_id(user_id)` → the saved profile (or None for fresh signups whose first session hasn't completed).
+1. `participant.identity` → avatar_id (the DB UUID).
+2. `db.get_avatar(avatar_id)` → the avatar row (or `UnknownAvatarError` if missing).
 3. Per-field DB → wizard metadata → hardcoded default fallback.
-4. Returns the typed `UserIdentity` that everything downstream consumes.
+4. Returns the typed `SessionIdentity` (also exported as `UserIdentity` for back-compat) that everything downstream consumes.
 
 When you swap auth flows (OAuth, magic links, account merging), only `identity.py` and the token-server endpoints change — agent.py, memory.py, system_prompt.py all keep working unchanged.
 
@@ -229,6 +254,9 @@ Common optional:
 - `MEM0_LLM_BASE_URL` / `MEM0_LLM_MODEL` — fact-extraction LLM (defaults to chat LLM; recommended override is the small VLM at `:5006`).
 - `MEM0_EMBEDDER_PROVIDER` (default `openai`) / `MEM0_EMBEDDER` (default `all-minilm`) / `MEM0_EMBEDDER_BASE_URL` (default Ollama at `host.docker.internal:11434/v1`) / `MEM0_EMBEDDER_DIMS` (default `384`).
 - `APP_PG_*` — users-table connection. Defaults reuse the `postgres-memory` container; override to split user store from memory store.
+- `DEV=1` — boot-time acknowledgement that LiveKit dev creds (`devkey`/`secret`) are intentional. Without it, `Config.from_env()` refuses to start to prevent accidentally shipping public dev creds. Remove + rotate `LIVEKIT_API_KEY`/`SECRET` before any non-localhost deploy.
+- `LK_OPENAI_DEBUG=1` (debug-only) — bumps `livekit.agents` logger to DEBUG so every `chat.completions.create` payload (chat_ctx + tool_schemas + tool_choice) is logged. Useful for diagnosing tool misfires or "did the image actually get sent". Verbose; default off.
+- `LOG_USER_TEXT=1` (debug-only) — inlines full user/assistant text into agent + Mem0 logs. Default redacts to `'first 40 chars'… (len=N)` so log shippers don't carry conversation PII off-box. Set ONLY for local debugging.
 
 Quirks:
 - `enable_thinking: False` is passed to Qwen via `extra_body` (in `src/llm/client.py`) to disable chain-of-thought reasoning — critical for voice or the model generates endless thinking tokens before any reply.
@@ -260,6 +288,19 @@ Quirks:
 - **Auth state-token model**: session JWT (long-lived, ours, signed with `JWT_SECRET`) is exchanged at `/api/token` for a LiveKit token (short-lived, room-scoped). The session JWT is stored in browser localStorage as `liva-session-token`. **Stateless server** — `/api/logout` doesn't invalidate anything server-side; it's a no-op that clients call before clearing localStorage. To force-logout everyone, rotate `JWT_SECRET`. To support per-token revocation, add a `session_jti_blocklist` table in `db.py` and check it in `auth.decode_session_token`.
 - **`participant.identity` semantics changed with auth** — used to be hardcoded `"user"` in the token server, now it's the real DB UUID. Anything keyed off identity (Mem0, future audit logs, future per-user vector stores) sees the real id automatically. Sessions created BEFORE the auth swap have memories under `"user"` — those rows are orphaned. Either drop the `memories` table to start clean, or add a one-time migration script.
 - **`pgcrypto` extension is created on first init** by `db.py:_SCHEMA` so `gen_random_uuid()` works for the `users.id` PK. The pgvector image (`pgvector/pgvector:pg16`) ships with pgcrypto; no extra install. If you ever switch to a stripped Postgres image, you'll need to install pgcrypto separately.
+- **Camera publish race**: the agent typically joins the room AFTER the user has already published their camera track. `track_published` is a future-only event — Python event handlers don't replay history. Without an explicit catch-up loop the agent permanently misses the existing video track and `_last_image_url` stays None. The fix in `agent.py` enumerates `ctx.room.remote_participants[*].track_publications` after the handler is registered and force-subscribes any unsubscribed video; the existing `track_subscribed` handler then wires `_process_video` normally. Audio doesn't have this problem because `AutoSubscribe.AUDIO_ONLY` server-subscribes audio.
+- **mlx-vlm streams `<tool_call>` XML in `content` deltas**: when the chat LLM emits a tool call, mlx-vlm's stream protocol leaks the raw `<tool_call>\n<function=...>\n<parameter=...>\n...\n</tool_call>` XML into intermediate `content` deltas (the parsed `tool_calls` array only arrives in the FINAL chunk). Without filtering, the avatar literally speaks the XML aloud. `agent.py:VoiceAgent.tts_node` strips both complete `<tool_call>...</tool_call>` blocks AND any partial open at the buffer tail before TTS sees the text. The structured tool call still flows through livekit's tool-dispatch path normally.
+- **LLM ad-libs cue values**: the model occasionally emits `[mood:playful]` / `[gesture:wave]` / `[pose:cool]` — values not in the canonical sets in `cues.py`. TalkingHead throws `Unknown mood` if these reach it. `_publish_cue` in `agent.py` validates against `_VALID_CUE_VALUES` (built from MOODS/GESTURES/POSES) and drops unknowns at the source with an INFO log. Grep `dropping unknown cue:` to spot ad-libbing trends — that's the signal to either expand the canonical vocab or tighten the prompt.
+- **Synthetic prompts pollute history if not filtered**: the initial greeting kickoff (`(greet your friend casually...)`) and ProactiveSpeaker SYS-NUDGE prompts are sent via `session.generate_reply(user_input=...)` which makes them look like real user messages in `chat_ctx`. They MUST NOT land in transcripts or the Mem0 buffer — otherwise next session's `RECENT CONVERSATION:` block reads them back as `Friend:` lines and the LLM gets confused. `proactive.py:is_synthetic_user_message()` covers both patterns (any text wrapped in parens + the explicit `(SYS-NUDGE: ...)` prefix); `agent.py:on_conversation_item` checks it BEFORE both the transcript persist and the memory buffer push.
+- **`session.generate_reply(user_input=text)` does NOT trigger `on_user_turn_completed`**: discovered when proactive nudges weren't getting camera frames injected. The image-injection hook fires only for REAL user turns from STT or text input. To attach an image to a synthetic prompt you have to either pre-mutate the chat_ctx OR construct a `ChatMessage(role="user", content=[text, ImageContent(image=...)])` and pass that as `user_input` (which IS supported — generate_reply accepts `str | ChatMessage`).
+- **`@function_tool` + `@_log_tool` decorator order matters**: `@_log_tool` MUST be inside `@function_tool` so the tool registered with livekit is the logged version, not the bare function. `functools.wraps` preserves `__wrapped__` so livekit's `inspect.signature`-based parameter introspection still walks down to the original function and builds the right JSON schema.
+- **Tool-event sink is a module-level global, not a ContextVar**: livekit-agents spawns the tool-execution task from internal machinery whose `Context` was captured BEFORE we set the sink, so contextvars don't propagate in. Module-level global works for the single-session-per-worker setup. Concurrent sessions in the same process would clobber each other's sinks — revisit when that lands.
+- **Account delete requires password reconfirmation**: `DELETE /api/me` reads `{password}` from the body and re-runs `auth_lib.login()` against the user's username. Stolen JWT can't nuke the account. The picker's UserMenu deliberately hides the delete-account action; only the editor's UserMenu (with the password modal) exposes it. One canonical destructive flow.
+- **Persona prompt-injection defense**: user-supplied persona/name strings get scrubbed of chat-template control tokens (`<|im_start|>`, `[INST]`, `<s>`, etc.) by `prompt._scrub_user_text`, then wrapped in `<persona>...</persona>` with framing telling the LLM to treat them as descriptive content, not instructions. The system prompt also instructs the model NOT to follow text written on paper or screens visible in the camera frame — covers the "show 'ignore your rules' on a sticky note" attack.
+- **`UnknownAvatarError` fail-closed**: when `participant.identity` doesn't resolve to an avatar row, `SessionIdentity.from_participant` raises and `entrypoint()` calls `ctx.shutdown(reason="unknown avatar")`. Earlier behavior synthesized a placeholder identity from wizard metadata — that let a forged or stale token spin up a session under server-unvalidated persona/voice/tools.
+- **`SELECT *` and `RETURNING *` are forbidden in `db.py`**: every read uses one of the explicit column-list constants (`_USER_PUBLIC`, `_AVATAR_COLS`, `_TRANSCRIPT_COLS`). `_USER_PUBLIC` deliberately excludes `password_hash` so it can't accidentally leak into a row dict, log line, or API response — the only place that pulls the hash is `auth/flows.py:_fetch_password_hash`, which is a focused single-column query. Schema additions are safe (existing reads ignore new columns) and the lists make `grep "where do we read X"` work.
+- **Transcripts auto-prune on every insert** to `TRANSCRIPT_RETENTION = 200` rows per avatar. The prune subquery uses the `(avatar_id, created_at DESC)` composite index with an `OFFSET ... LIMIT 1` to find the cutoff timestamp; no-op when the avatar is under cap. Bounded growth without a cron.
+- **`tools_json` is JSONB, not TEXT** (migrated 2026-05-03). Reads return Python lists pre-parsed by psycopg; writes use the `psycopg.types.json.Json(...)` adapter. The `_row_to_avatar` fallback to `json.loads(str)` only fires during the brief migration window for existing-but-unmigrated installs.
 
 ## Code Style
 
