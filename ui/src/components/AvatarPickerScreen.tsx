@@ -18,7 +18,6 @@ interface Props {
   // to the wizard just to log out).
   username: string;
   onLogout: () => void | Promise<void>;
-  onDeleteAccount?: () => void | Promise<void>;
 }
 
 /**
@@ -29,7 +28,7 @@ interface Props {
  * "+ New" creates a fresh row server-side and goes to the wizard with
  * default settings so the user can customize before starting.
  */
-export function AvatarPickerScreen({ token, onPick, username, onLogout, onDeleteAccount }: Props) {
+export function AvatarPickerScreen({ token, onPick, username, onLogout }: Props) {
   const [avatars, setAvatars] = useState<Avatar[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -126,10 +125,12 @@ export function AvatarPickerScreen({ token, onPick, username, onLogout, onDelete
           <h1>Pick a companion</h1>
           <p className="muted">Choose who you want to talk to today</p>
         </div>
+        {/* Delete-account lives only on the editor (which has the
+            password-confirm modal). Picker keeps the menu lighter — sign
+            out, switch — to avoid duplicating the destructive flow. */}
         <UserMenu
           username={username}
           onLogout={onLogout}
-          onDeleteAccount={onDeleteAccount}
         />
       </header>
 
