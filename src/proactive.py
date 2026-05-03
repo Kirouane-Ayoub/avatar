@@ -69,6 +69,24 @@ _ANTI_REPEAT_FOOTER = (
 )
 
 
+# Prepended to every nudge that has a camera frame available. Two jobs:
+# (1) override the system-prompt rule "only mention the camera if asked"
+#     for this single nudge — proactive check-ins are exactly when we
+#     WANT the avatar to notice what's visible.
+# (2) tell the LLM to ground its reaction in something specific it sees
+#     (a detail, posture, expression, surroundings) instead of generic
+#     small talk. Without this the avatar default-reverts to abstract
+#     comments about its day.
+_CAMERA_GROUNDING_PREFIX = (
+    "a camera frame is attached. for THIS reply, you SHOULD reference "
+    "something specific you actually see — a detail, expression, posture, "
+    "what they're holding, what's behind them. (this overrides the usual "
+    "'only mention camera if asked' rule for this one nudge.) NEVER say "
+    "'i can see you' or 'looking at the camera' literally — just react "
+    "naturally to what's visible. then: "
+)
+
+
 # Pool of distinct angles for the silence trigger. Each one nudges the
 # model toward a different conversational beat (observation vs question
 # vs joke vs callback) so consecutive nudges feel like a real person
@@ -94,6 +112,32 @@ _SILENCE_ANGLES: tuple[str, ...] = (
     "your friend has been quiet for a beat. give them a soft compliment "
     "about something they said or did this conversation — specific, not "
     "generic. don't be saccharine",
+)
+
+
+# Camera-aware silence angles. Picked instead of _SILENCE_ANGLES whenever
+# the user has their camera on at fire time — lets the proactive nudge
+# be grounded in actual visual context ("you just stretched, long day?")
+# rather than generic small talk. Each angle EXPECTS to be wrapped with
+# _CAMERA_GROUNDING_PREFIX upstream so the LLM knows it's allowed (and
+# expected) to reference what it sees.
+_SILENCE_CAMERA_ANGLES: tuple[str, ...] = (
+    "your friend has been quiet for a beat. notice ONE small specific "
+    "thing in the frame and comment on it casually — what they're holding, "
+    "wearing, doing with their hands, what's behind them. like a real "
+    "friend who just looked over",
+    "your friend has been quiet for a beat. notice their posture or what "
+    "their hands / face are doing right now and gently mention it — "
+    "they just rubbed their eyes? leaned back? grinned at something?",
+    "your friend has been quiet for a beat. ask about a specific detail "
+    "you can see — an object on their desk, an item of clothing, what's "
+    "on their wall. genuine curiosity, no help-desk energy",
+    "your friend has been quiet for a beat. tease them gently about "
+    "something visible — their pose, their setup, the way they're "
+    "sitting. playful, not weird",
+    "your friend has been quiet for a beat. comment on the overall vibe "
+    "of what you see — focused? cozy? chaotic? mid-something? — in one "
+    "natural-feeling line",
 )
 
 
@@ -189,6 +233,7 @@ class ProactiveSpeaker:
         config: ProactiveConfig,
         get_states: Callable[[], tuple[str, str]],
         get_last_mood: Callable[[], tuple[Optional[str], float]],
+        has_camera_frame: Callable[[], bool],
         fire: Callable[[str], None],
     ) -> None:
         """Args:
@@ -197,6 +242,10 @@ class ProactiveSpeaker:
                 "away", "initializing"). Read directly from AgentSession.
             get_last_mood: returns (mood, monotonic-ts-of-onset) from
                 VisionWatcher. (None, 0.0) when no mood yet.
+            has_camera_frame: returns True when there's a recent camera
+                frame the LLM can use as visual context. Drives the
+                choice between camera-grounded vs generic silence
+                prompts, and the camera-grounding prefix on every nudge.
             fire: callback that triggers the actual LLM-driven reply.
                 agent.py wraps `session.generate_reply(user_input=...)`
                 in this so the prompt is wrapped in SYS_NUDGE markers
@@ -205,6 +254,7 @@ class ProactiveSpeaker:
         self._config = config
         self._get_states = get_states
         self._get_last_mood = get_last_mood
+        self._has_camera_frame = has_camera_frame
         self._fire = fire
         self._task: Optional[asyncio.Task] = None
         self._stopped = asyncio.Event()
@@ -336,18 +386,24 @@ class ProactiveSpeaker:
         )
 
     def _silence_prompt(self) -> str:
-        # Pick a fresh angle, avoiding any template we've used in the
-        # last few fires this session. Variety + an explicit anti-repeat
-        # instruction is what stops the model from regurgitating the same
-        # "weather" / "I was thinking..." line on every nudge.
+        # Camera-grounded angles when a frame is available — much more
+        # natural than generic small talk ("you just stretched, long
+        # day?" beats "I was thinking about the weather"). Falls back
+        # to generic angles when camera is off.
+        if self._has_camera_frame():
+            body = self._pick_prompt(_SILENCE_CAMERA_ANGLES)
+            return _CAMERA_GROUNDING_PREFIX + body + _ANTI_REPEAT_FOOTER
         return self._pick_prompt(_SILENCE_ANGLES) + _ANTI_REPEAT_FOOTER
 
     def _mood_prompt(self, mood: str) -> str:
         # Mood-specific pools when we have one; generic when we don't.
+        # All mood-trigger nudges are camera-driven by definition (the
+        # mood is a frame classification), so always prepend the camera
+        # grounding prefix — the LLM should react to what it actually
+        # sees, not just the mood label.
         pool = _MOOD_ANGLES.get(mood, _MOOD_ANGLES_GENERIC)
-        # `mood` is interpolated into the chosen template via .format —
-        # generic templates expect a `{mood}` placeholder.
-        return self._pick_prompt(pool).format(mood=mood) + _ANTI_REPEAT_FOOTER
+        body = self._pick_prompt(pool).format(mood=mood)
+        return _CAMERA_GROUNDING_PREFIX + body + _ANTI_REPEAT_FOOTER
 
     def _pick_prompt(self, pool: tuple[str, ...]) -> str:
         """Random pick from `pool`, avoiding the last few we used (so
