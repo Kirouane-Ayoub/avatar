@@ -32,5 +32,6 @@ from .flows import (  # noqa: F401
 )
 from .identity import (  # noqa: F401
     SessionIdentity,
+    UnknownAvatarError,
     UserIdentity,  # back-compat alias
 )
