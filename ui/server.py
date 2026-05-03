@@ -347,6 +347,13 @@ class Handler(SimpleHTTPRequestHandler):
             return self._handle_token()
         if parsed.path == "/api/avatars":
             return self._handle_create_avatar()
+        # POST /api/avatars/<id>/forget — wipe this avatar's memory
+        # (transcripts + Mem0 facts) without deleting the avatar itself.
+        # Lets the user "start fresh" with the same companion.
+        if parsed.path.startswith("/api/avatars/") and parsed.path.endswith("/forget"):
+            avatar_id = parsed.path[len("/api/avatars/"):-len("/forget")].strip("/")
+            if avatar_id:
+                return self._handle_forget_avatar(avatar_id)
         self.send_error(404)
 
     def do_PATCH(self):
@@ -573,6 +580,52 @@ class Handler(SimpleHTTPRequestHandler):
             kwargs["vision_watcher"] = bool(cfg.get("vision_watcher", True))
         updated = _DB.update_avatar(avatar.id, **kwargs)
         self._send_json(200, {"avatar": self._avatar_to_json(updated) if updated else None})
+
+    # ── POST /api/avatars/:id/forget — wipe memory, KEEP avatar row ─────
+    def _handle_forget_avatar(self, avatar_id: str):
+        """Two-stage memory wipe for a single avatar:
+          1. transcripts table (verbatim short-term recall)
+          2. Mem0 distilled facts (long-term semantic memory)
+
+        Avatar row + its persona/voice/tools settings are preserved —
+        the user keeps the same companion but with a clean slate.
+
+        Best-effort on the Mem0 side: a memory backend hiccup
+        shouldn't block the transcript wipe (the visible part of the
+        reset). We log the partial failure but still return 200.
+        """
+        user_id = self._bearer_user_id()
+        if user_id is None:
+            return
+        avatar = self._own_avatar_or_404(user_id, avatar_id)
+        if avatar is None:
+            return
+        # Step 1: transcripts (always succeeds if DB is reachable).
+        transcripts_deleted = 0
+        try:
+            transcripts_deleted = _DB.delete_transcripts(avatar.id)
+        except Exception:
+            logger.exception("transcript wipe failed for avatar_id=%s", avatar.id)
+        # Step 2: Mem0 (best-effort — no separate count available from
+        # the Mem0 SDK, so we just report ok/error).
+        from memory import build_provider  # noqa: E402 — lazy keeps boot light
+        import asyncio
+        memory_ok = True
+        try:
+            provider = build_provider(_CONFIG)
+            asyncio.run(provider.forget(avatar.id))
+        except Exception:
+            logger.exception("memory wipe failed for avatar_id=%s", avatar.id)
+            memory_ok = False
+        logger.info(
+            "forget avatar: avatar_id=%s transcripts_deleted=%d memory_ok=%s",
+            avatar.id, transcripts_deleted, memory_ok,
+        )
+        self._send_json(200, {
+            "ok": True,
+            "transcripts_deleted": transcripts_deleted,
+            "memory_cleared": memory_ok,
+        })
 
     # ── DELETE /api/avatars/:id — wipe avatar + its memories ────────────
     def _handle_delete_avatar(self, avatar_id: str):
