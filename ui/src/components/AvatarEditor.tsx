@@ -276,6 +276,28 @@ export function AvatarEditor({
               </div>
             </div>
 
+            {/* Per-avatar opt-in: when on, the agent will softly check
+                in on the user during silences and react to camera mood
+                shifts. Heavily gated server-side (see proactive.py).
+                Default off — chatty companions are an opt-in choice. */}
+            <div className="form-field span-2">
+              <label>Personality</label>
+              <button
+                type="button"
+                className={`tool-chip${setup.proactive ? ' on' : ''}`}
+                title={
+                  'When on, the avatar will gently break silence with a soft '
+                  + 'check-in or react to your mood on camera. Limited to a '
+                  + 'few times per session so it never feels pushy.'
+                }
+                aria-pressed={setup.proactive}
+                onClick={() => onChange({ proactive: !setup.proactive })}
+              >
+                <span className="tool-check" aria-hidden />
+                Proactive — speak first when you're quiet
+              </button>
+            </div>
+
           </div>
 
           {error && <div className="form-error">{error}</div>}
