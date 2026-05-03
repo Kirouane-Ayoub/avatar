@@ -42,6 +42,10 @@ export interface SessionSetup {
   voice: string;
   tools: string[];
   camera: boolean;
+  // Per-avatar opt-in: when true the agent runs ProactiveSpeaker on the
+  // backend so the avatar will break silence and check in on the user.
+  // Off by default — quiet companion mode is the safer baseline.
+  proactive: boolean;
 }
 
 export interface TokenRequest extends Omit<SessionSetup, 'voice'> {
