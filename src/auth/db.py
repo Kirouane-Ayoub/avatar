@@ -485,6 +485,23 @@ class Db:
                 return cur.rowcount > 0
 
     # ── Transcripts (cross-session short-term memory) ───────────────────
+    def delete_transcripts(self, avatar_id: str) -> int:
+        """Wipe every transcript row for this avatar. Returns the count
+        of rows deleted, so the UI / caller can show "cleared N
+        messages." Mem0 facts live in a separate table — call
+        memory.forget(avatar_id) alongside this for a full reset.
+
+        Used by the per-avatar "Forget memory" UI action and by the
+        delete-avatar flow's memory cleanup path.
+        """
+        with self._pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM transcripts WHERE avatar_id = %s",
+                    (avatar_id,),
+                )
+                return cur.rowcount
+
     def record_transcript(
         self, avatar_id: str, role: str, text: str
     ) -> None:
