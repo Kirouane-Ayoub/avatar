@@ -3,6 +3,7 @@ import {
   type Avatar,
   createAvatar,
   deleteAvatar as apiDeleteAvatar,
+  forgetAvatar as apiForgetAvatar,
   listAvatars,
 } from '../api';
 import { AVATARS, DEFAULT_AVATAR_KEY } from '../data/avatars';
@@ -35,6 +36,13 @@ export function AvatarPickerScreen({ token, onPick, username, onLogout, onDelete
   const [creating, setCreating] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<Avatar | null>(null);
   const [deleting, setDeleting] = useState(false);
+  // "Forget memory" parallels delete but keeps the card around. Lower
+  // friction (no name typing) since the avatar itself survives.
+  const [pendingForget, setPendingForget] = useState<Avatar | null>(null);
+  const [forgetting, setForgetting] = useState(false);
+  // Brief success line shown above the grid after a wipe — auto-clears
+  // when the user navigates away from the screen so it doesn't get stale.
+  const [forgetMsg, setForgetMsg] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -87,6 +95,26 @@ export function AvatarPickerScreen({ token, onPick, username, onLogout, onDelete
     }
   };
 
+  const confirmForget = async () => {
+    if (!pendingForget) return;
+    setForgetting(true);
+    setError(null);
+    setForgetMsg(null);
+    try {
+      const r = await apiForgetAvatar(token, pendingForget.id);
+      setForgetMsg(
+        `Cleared ${pendingForget.name}'s memory — `
+        + `${r.transcripts_deleted} message${r.transcripts_deleted === 1 ? '' : 's'} wiped`
+        + (r.memory_cleared ? '.' : ' (long-term memory partial — check logs).'),
+      );
+      setPendingForget(null);
+    } catch (e) {
+      setError(`Forget failed: ${(e as Error).message}`);
+    } finally {
+      setForgetting(false);
+    }
+  };
+
   if (loading) {
     return <div className="auth-splash">Loading your companions…</div>;
   }
@@ -106,6 +134,9 @@ export function AvatarPickerScreen({ token, onPick, username, onLogout, onDelete
       </header>
 
       {error && <div className="login-error" style={{ marginBottom: 12 }}>{error}</div>}
+      {forgetMsg && (
+        <div className="picker-toast" role="status">{forgetMsg}</div>
+      )}
 
       <div className="picker-grid">
         {(avatars || []).map((a) => {
@@ -131,14 +162,24 @@ export function AvatarPickerScreen({ token, onPick, username, onLogout, onDelete
                   </div>
                 </div>
               </button>
-              <button
-                type="button"
-                className="link danger-btn picker-card-delete"
-                onClick={() => setPendingDelete(a)}
-                title="Delete avatar + memories"
-              >
-                Delete
-              </button>
+              <div className="picker-card-actions">
+                <button
+                  type="button"
+                  className="link picker-card-action"
+                  onClick={() => setPendingForget(a)}
+                  title={`Wipe ${a.name}'s memory — keeps the avatar, persona, and voice`}
+                >
+                  Forget memory
+                </button>
+                <button
+                  type="button"
+                  className="link danger-btn picker-card-action"
+                  onClick={() => setPendingDelete(a)}
+                  title="Delete avatar + memories"
+                >
+                  Delete
+                </button>
+              </div>
             </div>
           );
         })}
@@ -166,6 +207,23 @@ export function AvatarPickerScreen({ token, onPick, username, onLogout, onDelete
         busy={deleting}
         onConfirm={confirmDelete}
         onCancel={() => !deleting && setPendingDelete(null)}
+      />
+
+      <ConfirmDialog
+        open={!!pendingForget}
+        tone="danger"
+        title={pendingForget ? `Forget ${pendingForget.name}'s memory?` : ''}
+        description={
+          'Wipes every past message and every learned fact for this '
+          + 'companion. The avatar itself, persona, voice, and tools '
+          + 'are kept — use this to start fresh without losing the '
+          + 'character you built.'
+        }
+        confirmLabel="Forget"
+        cancelLabel="Keep memory"
+        busy={forgetting}
+        onConfirm={confirmForget}
+        onCancel={() => !forgetting && setPendingForget(null)}
       />
     </div>
   );
