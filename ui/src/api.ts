@@ -22,6 +22,7 @@ export interface Avatar {
   avatar_key: string | null;
   tools: string[];
   proactive: boolean;
+  vision_watcher: boolean;
   last_used_at: string | null;
 }
 
