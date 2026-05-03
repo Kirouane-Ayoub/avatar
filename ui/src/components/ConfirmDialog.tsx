@@ -9,11 +9,16 @@ interface Props {
   // accidental destructive actions.
   confirmPhrase?: string;
   confirmPhraseLabel?: string;
+  // When present, shows a password field. The collected password is
+  // passed to onConfirm — server re-verifies it before performing the
+  // irreversible action. Used for things like account deletion where
+  // the session JWT alone isn't enough authority.
+  passwordLabel?: string;
   confirmLabel?: string;
   cancelLabel?: string;
   tone?: 'danger' | 'default';
   busy?: boolean;
-  onConfirm: () => void | Promise<void>;
+  onConfirm: (args?: { password?: string }) => void | Promise<void>;
   onCancel: () => void;
 }
 
@@ -29,6 +34,7 @@ export function ConfirmDialog({
   description,
   confirmPhrase,
   confirmPhraseLabel,
+  passwordLabel,
   confirmLabel = 'Confirm',
   cancelLabel = 'Cancel',
   tone = 'default',
@@ -37,6 +43,7 @@ export function ConfirmDialog({
   onCancel,
 }: Props) {
   const [typed, setTyped] = useState('');
+  const [password, setPassword] = useState('');
   const titleId = useId();
   const descId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -45,6 +52,7 @@ export function ConfirmDialog({
   useEffect(() => {
     if (!open) return;
     setTyped('');
+    setPassword('');
     const t = window.setTimeout(() => {
       (inputRef.current ?? confirmRef.current)?.focus();
     }, 30);
@@ -66,7 +74,12 @@ export function ConfirmDialog({
   const phraseOk =
     !confirmPhrase ||
     typed.trim().toLowerCase() === confirmPhrase.toLowerCase();
-  const canConfirm = phraseOk && !busy;
+  const passwordOk = !passwordLabel || password.length > 0;
+  const canConfirm = phraseOk && passwordOk && !busy;
+  const submit = () => {
+    if (!canConfirm) return;
+    return onConfirm(passwordLabel ? { password } : undefined);
+  };
 
   return (
     <div
@@ -104,10 +117,28 @@ export function ConfirmDialog({
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && canConfirm) {
                   e.preventDefault();
-                  onConfirm();
+                  submit();
                 }
               }}
               placeholder={confirmPhrase}
+            />
+          </label>
+        )}
+
+        {passwordLabel && (
+          <label className="cd-field">
+            <span>{passwordLabel}</span>
+            <input
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && canConfirm) {
+                  e.preventDefault();
+                  submit();
+                }
+              }}
             />
           </label>
         )}
@@ -125,7 +156,7 @@ export function ConfirmDialog({
             ref={confirmRef}
             type="button"
             className={`cd-btn cd-confirm${tone === 'danger' ? ' cd-confirm-danger' : ''}`}
-            onClick={onConfirm}
+            onClick={submit}
             disabled={!canConfirm}
           >
             {busy ? 'Working…' : confirmLabel}
