@@ -76,7 +76,7 @@ TRANSCRIPT_RETENTION = 200
 _USER_PUBLIC = "id, username, display_name, created_at, updated_at"
 _AVATAR_COLS = (
     "id, user_id, name, persona, voice, avatar_key, "
-    "tools_json, created_at, updated_at, last_used_at"
+    "tools_json, proactive, created_at, updated_at, last_used_at"
 )
 _TRANSCRIPT_COLS = "id, avatar_id, role, text, created_at"
 
@@ -117,6 +117,11 @@ CREATE TABLE IF NOT EXISTS avatars (
     voice           TEXT,
     avatar_key      TEXT,                            -- 3D model key from ui/data/avatars
     tools_json      JSONB,                           -- JSON array of enabled tool ids
+    -- Opt-in: when TRUE, the agent will proactively break silence and
+    -- check in on the user (no help-desk energy, gated heavily). When
+    -- FALSE (default), the avatar only speaks in response to user turns
+    -- — quiet companion mode.
+    proactive       BOOLEAN      NOT NULL DEFAULT FALSE,
     created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
     -- Touched on every session start; lets the UI sort "recently chatted with"
@@ -151,6 +156,11 @@ CREATE INDEX IF NOT EXISTS transcripts_avatar_ts_idx
 -- composite indexes (via leftmost-prefix) cover the same lookups.
 DROP INDEX IF EXISTS users_username_idx;
 DROP INDEX IF EXISTS avatars_user_id_idx;
+
+-- Backfill: existing avatar rows from before the proactive feature
+-- need the column added (CREATE TABLE IF NOT EXISTS skips it on
+-- existing tables). Default FALSE — opt-in.
+ALTER TABLE avatars ADD COLUMN IF NOT EXISTS proactive BOOLEAN NOT NULL DEFAULT FALSE;
 
 -- Convert avatars.tools_json from TEXT to JSONB. Wrapped in a DO block
 -- so it only fires when the column is still TEXT — re-running on JSONB
@@ -210,6 +220,10 @@ class Avatar:
     voice: Optional[str]
     avatar_key: Optional[str]
     tools: list  # decoded from tools_json
+    # Whether this avatar should proactively break silence (per-avatar
+    # opt-in). Drives src/proactive.py at session start. Off by default
+    # — quiet companion mode is the safer baseline.
+    proactive: bool
     created_at: datetime
     updated_at: datetime
     last_used_at: datetime
@@ -359,6 +373,7 @@ class Db:
         voice: Optional[str] = None,
         avatar_key: Optional[str] = None,
         tools: Optional[list] = None,
+        proactive: bool = False,
     ) -> Avatar:
         """Insert a new avatar for the given user. Required: user_id +
         name. All other fields optional — caller can fill them in
@@ -367,8 +382,9 @@ class Db:
             with conn.cursor() as cur:
                 cur.execute(
                     f"""
-                    INSERT INTO avatars (user_id, name, persona, voice, avatar_key, tools_json)
-                    VALUES (%s, %s, %s, %s, %s, %s)
+                    INSERT INTO avatars
+                        (user_id, name, persona, voice, avatar_key, tools_json, proactive)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
                     RETURNING {_AVATAR_COLS}
                     """,
                     (
@@ -378,6 +394,7 @@ class Db:
                         # this, psycopg would try str-cast and Postgres would
                         # reject the cast).
                         Json(tools) if tools is not None else None,
+                        proactive,
                     ),
                 )
                 row = cur.fetchone()
@@ -392,6 +409,7 @@ class Db:
         voice: Optional[str] = None,
         avatar_key: Optional[str] = None,
         tools: Optional[list] = None,
+        proactive: Optional[bool] = None,
         touch_last_used: bool = False,
     ) -> Optional[Avatar]:
         """Patch update — only fields passed as kwargs are written. Set
@@ -414,6 +432,9 @@ class Db:
         if tools is not None:
             sets.append("tools_json = %s")
             params.append(Json(tools))
+        if proactive is not None:
+            sets.append("proactive = %s")
+            params.append(proactive)
         if touch_last_used:
             sets.append("last_used_at = NOW()")
         if not sets:
@@ -555,6 +576,7 @@ def _row_to_avatar(row: dict) -> Avatar:
         voice=row.get("voice"),
         avatar_key=row.get("avatar_key"),
         tools=tools,
+        proactive=bool(row.get("proactive", False)),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         last_used_at=row["last_used_at"],
