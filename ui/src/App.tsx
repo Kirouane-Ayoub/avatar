@@ -1,14 +1,16 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { SessionSetup } from './types';
 import { type Avatar, requestToken, updateAvatar } from './api';
 import { AVATARS, DEFAULT_AVATAR_KEY } from './data/avatars';
 import { TOOL_CATALOG } from './data/tools';
 import { useAuth } from './hooks/useAuth';
 import { useLocalStorage } from './hooks/useLocalStorage';
+import { useTheme } from './hooks/useTheme';
 import { AvatarEditor } from './components/AvatarEditor';
 import { AvatarPickerScreen } from './components/AvatarPickerScreen';
 import { LoginScreen } from './components/LoginScreen';
 import { SessionView, type ConnectionInfo } from './components/SessionView';
+import { SettingsModal } from './components/SettingsModal';
 
 const DEFAULT_PERSONA =
   'A warm, curious friend in their late 20s. Easygoing, honest, a little playful.';
@@ -47,6 +49,10 @@ export default function App() {
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [connection, setConnection] = useState<ConnectionInfo | null>(null);
+  // Theme (light/dark + accent) — owned once here, applied to <html> by the
+  // hook, surfaced through the app-wide Settings modal.
+  const theme = useTheme();
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   // Seed the wizard's setup from the active avatar whenever the user
   // picks a different one. Tracked via ref so subsequent edits within
@@ -127,14 +133,18 @@ export default function App() {
     [setup, auth.token, activeAvatar],
   );
 
+  const avatar = AVATARS[setup.avatar] ?? AVATARS[DEFAULT_AVATAR_KEY];
+
+  // Resolve the active screen, then wrap it with the app-wide theme control
+  // + Settings modal so appearance is reachable from every screen (including
+  // login and in-call).
+  let screen: ReactNode;
   if (auth.loading) {
-    return <div className="auth-splash">Checking session…</div>;
-  }
-  if (!auth.user) {
-    return <LoginScreen auth={auth} />;
-  }
-  if (!activeAvatar) {
-    return (
+    screen = <div className="auth-splash">Checking session…</div>;
+  } else if (!auth.user) {
+    screen = <LoginScreen auth={auth} />;
+  } else if (!activeAvatar) {
+    screen = (
       <AvatarPickerScreen
         token={auth.token!}
         username={auth.user.username}
@@ -142,10 +152,8 @@ export default function App() {
         onPick={setActiveAvatar}
       />
     );
-  }
-
-  if (!connection) {
-    return (
+  } else if (!connection) {
+    screen = (
       <AvatarEditor
         setup={setup}
         onChange={patch}
@@ -158,16 +166,49 @@ export default function App() {
         onBackToPicker={() => setActiveAvatar(null)}
       />
     );
+  } else {
+    screen = (
+      <SessionView
+        setup={setup}
+        avatar={avatar}
+        connection={connection}
+        onExit={() => setConnection(null)}
+      />
+    );
   }
 
-  const avatar = AVATARS[setup.avatar] ?? AVATARS[DEFAULT_AVATAR_KEY];
-
   return (
-    <SessionView
-      setup={setup}
-      avatar={avatar}
-      connection={connection}
-      onExit={() => setConnection(null)}
-    />
+    <>
+      {screen}
+      <button
+        type="button"
+        className="theme-fab"
+        onClick={() => setSettingsOpen(true)}
+        aria-label="Appearance settings"
+        title="Appearance"
+      >
+        {theme.resolved === 'dark' ? (
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+          </svg>
+        ) : (
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="4" />
+            <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+          </svg>
+        )}
+      </button>
+      <SettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        username={auth.user?.username}
+        mode={theme.mode}
+        accent={theme.accent}
+        onModeChange={theme.setMode}
+        onAccentChange={theme.setAccent}
+      />
+    </>
   );
 }
