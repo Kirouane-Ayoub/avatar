@@ -70,6 +70,14 @@ class Config:
     orpheus_base_url: Optional[str] = None
     orpheus_model: str = "orpheus"
 
+    # ── Supertonic TTS (optional third backend) ─────────────────────────
+    # When unset, Supertonic voices selected in the wizard fail loudly at
+    # session start — Kokoro/Orpheus voices are unaffected. 44.1kHz WAV,
+    # no word timestamps (jaw-only lipsync). Voice = style (F1-F5/M1-M5).
+    supertonic_base_url: Optional[str] = None
+    supertonic_model: str = "supertonic-3"
+    supertonic_speed: float = 1.0
+
     # ── Ambient affect VLM (optional) ───────────────────────────────────
     # When unset, VisionWatcher uses NullProvider equivalent — no ambient
     # mood detection, the LLM's speech-time cues remain the only source.
@@ -185,6 +193,10 @@ class Config:
             # Orpheus
             orpheus_base_url=os.getenv("ORPHEUS_BASE_URL"),
             orpheus_model=os.getenv("ORPHEUS_MODEL", "orpheus"),
+            # Supertonic
+            supertonic_base_url=os.getenv("SUPERTONIC_BASE_URL"),
+            supertonic_model=os.getenv("SUPERTONIC_MODEL", "supertonic-3"),
+            supertonic_speed=float(os.getenv("SUPERTONIC_SPEED", "1.0")),
             # VLM watcher
             vlm_base_url=os.getenv("VLM_BASE_URL"),
             vlm_model=os.getenv("VLM_MODEL", "mlx-community/Qwen3-VL-2B-Instruct-4bit"),
