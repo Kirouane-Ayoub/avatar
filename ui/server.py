@@ -20,7 +20,13 @@ from livekit.api import AccessToken, VideoGrants
 # Import shared modules from src/.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from cues import MOODS  # noqa: E402
-from tts import KOKORO_VOICES, ORPHEUS_VOICES, backend_for  # noqa: E402
+from tts import (  # noqa: E402
+    KOKORO_VOICES,
+    ORPHEUS_VOICES,
+    SUPERTONIC_VOICES,
+    backend_for,
+    supertonic_style_for,
+)
 
 load_dotenv()
 
@@ -65,6 +71,13 @@ TTS_BASE_URL = os.getenv("TTS_BASE_URL", "http://kokoro-tts:8880").rstrip("/")
 TTS_MODEL = os.getenv("TTS_MODEL", "kokoro")
 ORPHEUS_BASE_URL = (os.getenv("ORPHEUS_BASE_URL") or "").rstrip("/")
 ORPHEUS_MODEL = os.getenv("ORPHEUS_MODEL", "orpheus")
+# Supertonic root (strip a trailing /v1 if the env var was pasted with it —
+# the OpenAI path /v1/audio/speech is appended below).
+SUPERTONIC_BASE_URL = (os.getenv("SUPERTONIC_BASE_URL") or "").rstrip("/")
+if SUPERTONIC_BASE_URL.endswith("/v1"):
+    SUPERTONIC_BASE_URL = SUPERTONIC_BASE_URL[: -len("/v1")]
+SUPERTONIC_MODEL = os.getenv("SUPERTONIC_MODEL", "supertonic-3")
+SUPERTONIC_SPEED = float(os.getenv("SUPERTONIC_SPEED", "1.0"))
 
 # Serialize voice-sample proxy calls so a fast-clicking user can't pile up
 # concurrent Kokoro generations and OOM-kill the container. One concurrent
@@ -215,7 +228,25 @@ class Handler(SimpleHTTPRequestHandler):
         # JSON, static assets, voice-sample stream). Cheap, cross-cutting,
         # and ineffective if applied selectively.
         self._send_security_headers()
+        self._send_cache_headers()
         super().end_headers()
+
+    def _send_cache_headers(self):
+        """Cache policy for static GETs. Vite content-hashes asset
+        filenames (index-<hash>.js/.css), so those are safe to cache
+        forever — but index.html references the *current* hashes and MUST
+        be revalidated every load, otherwise a stale cached index keeps
+        loading old JS/CSS after a redeploy (this is exactly the "icons
+        still black after the fix shipped" symptom). API responses set
+        their own policy (or none), so skip them to avoid duplicate
+        Cache-Control headers."""
+        path = self.path.split("?", 1)[0]
+        if path.startswith("/api/"):
+            return
+        if path.startswith("/assets/"):
+            self.send_header("Cache-Control", "public, max-age=31536000, immutable")
+        elif path == "/" or path.endswith(".html"):
+            self.send_header("Cache-Control", "no-cache")
 
     def _send_security_headers(self):
         """Defense-in-depth headers for browser-loaded responses.
@@ -351,6 +382,16 @@ class Handler(SimpleHTTPRequestHandler):
                     501, {"error": "orpheus preview unavailable (ORPHEUS_BASE_URL unset)"}
                 )
                 return
+        elif backend == "supertonic":
+            if voice not in SUPERTONIC_VOICES:
+                self._send_json(400, {"error": "unknown voice"})
+                return
+            if not SUPERTONIC_BASE_URL:
+                self._send_json(
+                    501,
+                    {"error": "supertonic preview unavailable (SUPERTONIC_BASE_URL unset)"},
+                )
+                return
         else:
             if voice not in _available_voice_ids():
                 self._send_json(400, {"error": "unknown voice"})
@@ -373,6 +414,10 @@ class Handler(SimpleHTTPRequestHandler):
             base_url = ORPHEUS_BASE_URL
             model = ORPHEUS_MODEL  # full HF id, e.g. mlx-community/orpheus-...
             response_format = "wav"  # mlx-audio returns a buffered WAV when stream is unset
+        elif backend == "supertonic":
+            base_url = SUPERTONIC_BASE_URL
+            model = SUPERTONIC_MODEL
+            response_format = "wav"  # Supertonic serves a buffered 44.1kHz WAV
         else:
             base_url = TTS_BASE_URL
             model = TTS_MODEL
@@ -390,6 +435,12 @@ class Handler(SimpleHTTPRequestHandler):
             payload_obj.update(
                 {"temperature": 0.6, "top_p": 0.8, "repetition_penalty": 1.3}
             )
+        elif backend == "supertonic":
+            # `voice` is the bare style (F1..M5); spoken language is a
+            # separate field so Greek samples (el_F2) preview in Greek.
+            payload_obj["voice"] = supertonic_style_for(voice)
+            payload_obj["speed"] = SUPERTONIC_SPEED
+            payload_obj["lang"] = SUPERTONIC_VOICES[voice].get("stt", "en")
         payload = json.dumps(payload_obj).encode()
         req = urllib.request.Request(
             f"{base_url}/v1/audio/speech",
@@ -853,6 +904,12 @@ class Handler(SimpleHTTPRequestHandler):
             voices += [
                 {"id": vid, "backend": "orpheus", **meta}
                 for vid, meta in ORPHEUS_VOICES.items()
+            ]
+            # Supertonic exposed unconditionally too — same fail-loud-at-
+            # session-start contract as Orpheus if SUPERTONIC_BASE_URL is unset.
+            voices += [
+                {"id": vid, "backend": "supertonic", **meta}
+                for vid, meta in SUPERTONIC_VOICES.items()
             ]
             self._send_json(200, {"voices": voices})
             return
