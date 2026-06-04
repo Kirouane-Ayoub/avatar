@@ -4,6 +4,22 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Avatar — AI Voice Assistant</title>
+    <!-- Apply saved theme/accent before first paint to avoid a flash.
+         Mirrors ui/src/hooks/useTheme.ts (keys + defaults). -->
+    <script>
+      (function () {
+        try {
+          var m = localStorage.getItem('liva-theme-mode') || 'system';
+          var a = localStorage.getItem('liva-theme-accent') || 'indigo';
+          var dark = m === 'dark' ||
+            (m === 'system' && window.matchMedia &&
+             window.matchMedia('(prefers-color-scheme: dark)').matches);
+          var r = document.documentElement;
+          r.dataset.theme = dark ? 'dark' : 'light';
+          r.dataset.accent = a;
+        } catch (e) { /* localStorage blocked — fall back to CSS :root default */ }
+      })();
+    </script>
     <script type="importmap">
       {
         "imports": {
