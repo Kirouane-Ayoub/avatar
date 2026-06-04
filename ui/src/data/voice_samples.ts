@@ -10,6 +10,8 @@ const FALLBACK = 'Hi there. This is how I sound.';
 const SAMPLES: Record<string, string> = {
   'American English': 'Hi there. This is how I sound — nice to meet you.',
   'British English': 'Hello there. This is how I sound — lovely to meet you.',
+  English: 'Hi there. This is how I sound — nice to meet you.',
+  Greek: 'Γειά σου, αυτή είναι η φωνή μου. Χαίρομαι που σε γνωρίζω.',
   Japanese: 'こんにちは。これが私の声です。よろしくね。',
   'Mandarin Chinese': '你好，这是我的声音，很高兴认识你。',
   Spanish: 'Hola, así suena mi voz. Encantada de conocerte.',
