@@ -56,7 +56,45 @@ const BACKEND_LABELS: Record<VoiceBackend, { label: string; hint: string }> = {
     label: 'Expressive',
     hint: 'Orpheus — slower but richer, more emotion. Best for deeper conversations.',
   },
+  supertonic: {
+    label: 'Studio',
+    hint: 'Supertonic — 44.1kHz studio-quality, multilingual styles. Crisp and high-fidelity.',
+  },
 };
+
+// Flag / script badge per language label, so languages are scannable at a
+// glance in the rail and the cards. Falls back to a globe for anything
+// unmapped. Keys are the verbatim `language` values from /api/voices.
+const LANG_BADGE: Record<string, string> = {
+  'American English': '🇺🇸',
+  'British English': '🇬🇧',
+  English: '🇬🇧',
+  Greek: '🇬🇷',
+  Japanese: '🇯🇵',
+  'Mandarin Chinese': '🇨🇳',
+  Spanish: '🇪🇸',
+  French: '🇫🇷',
+  German: '🇩🇪',
+  Italian: '🇮🇹',
+  Hindi: '🇮🇳',
+  Korean: '🇰🇷',
+  'Brazilian Portuguese': '🇧🇷',
+};
+function langBadge(language: string): string {
+  return LANG_BADGE[language] ?? '🌐';
+}
+
+// Compact rail labels — drop redundant qualifiers so the narrow left
+// column reads cleanly (full label still shown via title attr).
+function shortLang(language: string): string {
+  switch (language) {
+    case 'American English': return 'American';
+    case 'British English': return 'British';
+    case 'Mandarin Chinese': return 'Mandarin';
+    case 'Brazilian Portuguese': return 'Portuguese';
+    default: return language;
+  }
+}
 
 function parseVoice(v: VoiceInfo) {
   const rest = v.id.includes('_') ? v.id.slice(v.id.indexOf('_') + 1) : v.id;
@@ -78,6 +116,18 @@ function PlayGlyph({ state }: { state: 'idle' | 'loading' | 'playing' }) {
     <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden>
       <path d="M3 2 L10 6 L3 10 Z" fill="currentColor" />
     </svg>
+  );
+}
+
+// Live waveform shown on a card while its sample is playing — clearer
+// "this one is speaking" feedback than the small spinner alone.
+function Waveform() {
+  return (
+    <span className="voice-wave" aria-label="playing">
+      {Array.from({ length: 7 }).map((_, i) => (
+        <span key={i} style={{ animationDelay: `${i * 0.09}s` }} />
+      ))}
+    </span>
   );
 }
 
@@ -124,64 +174,66 @@ export function VoicePicker({ value, onChange, name }: Props) {
 
   useEffect(() => cleanup, []);
 
-  // Backend chips show only when the catalog actually contains both — no point
-  // rendering a "Kokoro / Orpheus" toggle when only one is available.
-  const backendCounts = useMemo(() => {
-    const counts: Record<VoiceBackend, number> = { kokoro: 0, orpheus: 0 };
-    for (const v of voices) {
-      const b = v.backend ?? 'kokoro';
-      counts[b] += 1;
-    }
-    return counts;
-  }, [voices]);
-  const showBackendChips = backendCounts.kokoro > 0 && backendCounts.orpheus > 0;
-
-  // Language counts are scoped to the active backend filter so the chip
-  // counts reflect what the user will actually see in the list below.
+  // Language rail — one row per distinct language across ALL engines, so the
+  // rail is stable regardless of the engine sub-filter. Sorted by population
+  // (busiest language first) then name, with the avatar's currently-selected
+  // language guaranteed visible.
   const languages = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const v of voices) {
-      if (backendFilter !== 'all' && (v.backend ?? 'kokoro') !== backendFilter) continue;
-      counts.set(v.language, (counts.get(v.language) ?? 0) + 1);
-    }
+    for (const v of voices) counts.set(v.language, (counts.get(v.language) ?? 0) + 1);
     return [...counts.entries()]
       .map(([lang, count]) => ({ lang, count }))
-      .sort((a, b) => a.lang.localeCompare(b.lang));
-  }, [voices, backendFilter]);
+      .sort((a, b) => (b.count - a.count) || a.lang.localeCompare(b.lang));
+  }, [voices]);
 
-  // Reset the language chip if it's no longer offered under the active
-  // backend filter, otherwise the list would silently go empty.
+  // Voices in the selected language (or all) — drives the engine chip counts
+  // and their visibility (only worth showing when a language spans engines).
+  const langScopedVoices = useMemo(
+    () => (langFilter === 'all' ? voices : voices.filter((v) => v.language === langFilter)),
+    [voices, langFilter],
+  );
+  const backendCounts = useMemo(() => {
+    const counts: Record<VoiceBackend, number> = { kokoro: 0, orpheus: 0, supertonic: 0 };
+    for (const v of langScopedVoices) counts[v.backend ?? 'kokoro'] += 1;
+    return counts;
+  }, [langScopedVoices]);
+  const activeBackends = useMemo(
+    () => (Object.keys(backendCounts) as VoiceBackend[]).filter((b) => backendCounts[b] > 0),
+    [backendCounts],
+  );
+  const showBackendChips = activeBackends.length > 1;
+
+  // Switching language clears any engine sub-filter that may not exist under
+  // the new language (otherwise the list silently goes empty).
   useEffect(() => {
-    if (langFilter === 'all') return;
-    if (!languages.some((l) => l.lang === langFilter)) {
-      setLangFilter('all');
-    }
-  }, [languages, langFilter]);
+    setBackendFilter('all');
+  }, [langFilter]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const list = voices
-      .map(parseVoice)
-      .filter((v) => backendFilter === 'all' || (v.backend ?? 'kokoro') === backendFilter)
-      .filter((v) => langFilter === 'all' || v.language === langFilter)
-      .filter((v) => {
-        if (!q) return true;
-        return (
+    // When the user is actively searching, ignore the language rail and look
+    // across every language — finding a voice by name shouldn't require first
+    // landing on its language.
+    let list = (q ? voices : langScopedVoices).map(parseVoice);
+    list = list.filter((v) => backendFilter === 'all' || (v.backend ?? 'kokoro') === backendFilter);
+    if (q) {
+      list = list.filter(
+        (v) =>
           v.id.toLowerCase().includes(q) ||
           v.displayName.toLowerCase().includes(q) ||
-          v.language.toLowerCase().includes(q)
-        );
-      });
+          v.language.toLowerCase().includes(q),
+      );
+    }
     list.sort((a, b) => {
-      // Pin the currently-selected voice to the top so the user
-      // always sees their pick first, even after filter changes.
+      // Pin the currently-selected voice to the top so the user always sees
+      // their pick first, even after filter changes.
       if (a.id === value && b.id !== value) return -1;
       if (b.id === value && a.id !== value) return 1;
       if (a.language !== b.language) return a.language.localeCompare(b.language);
       return gradeRank(a.grade) - gradeRank(b.grade);
     });
     return list;
-  }, [voices, query, langFilter, backendFilter, value]);
+  }, [voices, langScopedVoices, query, backendFilter, value]);
 
   // Resolve the currently-selected voice for the header banner. Empty
   // value means "auto" — agent picks one based on avatar gender + language.
@@ -233,7 +285,7 @@ export function VoicePicker({ value, onChange, name }: Props) {
   };
 
   return (
-    <div className="voice-picker">
+    <div className="voice-picker voice-picker-split">
       {/* "Currently using" banner — answers the user's #1 question
           ("which voice did I pick?") without scrolling, and surfaces
           the auto-pick fallback when nothing's selected so users know
@@ -241,6 +293,7 @@ export function VoicePicker({ value, onChange, name }: Props) {
       <div className="voice-current">
         {selectedVoice ? (
           <>
+            <span className="voice-current-flag" aria-hidden>{langBadge(selectedVoice.language)}</span>
             <span className="voice-current-label">Currently using</span>
             <strong className="voice-current-name">{selectedVoice.displayName}</strong>
             <span className="voice-current-meta">
@@ -272,112 +325,121 @@ export function VoicePicker({ value, onChange, name }: Props) {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
-        {showBackendChips && (
-          <div className="voice-lang-chips voice-backend-chips">
-            <button
-              type="button"
-              className={`lang-chip${backendFilter === 'all' ? ' active' : ''}`}
-              onClick={() => setBackendFilter('all')}
-              title="Show every voice across both engines"
-            >
-              All voices <span className="lang-count">{voices.length}</span>
-            </button>
-            <button
-              type="button"
-              className={`lang-chip${backendFilter === 'kokoro' ? ' active' : ''}`}
-              onClick={() => setBackendFilter('kokoro')}
-              title={BACKEND_LABELS.kokoro.hint}
-            >
-              {BACKEND_LABELS.kokoro.label} <span className="lang-count">{backendCounts.kokoro}</span>
-            </button>
-            <button
-              type="button"
-              className={`lang-chip${backendFilter === 'orpheus' ? ' active' : ''}`}
-              onClick={() => setBackendFilter('orpheus')}
-              title={BACKEND_LABELS.orpheus.hint}
-            >
-              {BACKEND_LABELS.orpheus.label} <span className="lang-count">{backendCounts.orpheus}</span>
-            </button>
-          </div>
-        )}
-        {languages.length > 1 && (
-          <div className="voice-lang-chips">
-            <button
-              type="button"
-              className={`lang-chip${langFilter === 'all' ? ' active' : ''}`}
-              onClick={() => setLangFilter('all')}
-            >
-              All <span className="lang-count">
-                {languages.reduce((s, l) => s + l.count, 0)}
-              </span>
-            </button>
-            {languages.map(({ lang, count }) => (
-              <button
-                key={lang}
-                type="button"
-                className={`lang-chip${langFilter === lang ? ' active' : ''}`}
-                onClick={() => setLangFilter(lang)}
-              >
-                {lang.replace(' English', '')}
-                <span className="lang-count">{count}</span>
-              </button>
-            ))}
-          </div>
-        )}
       </div>
 
-      <div className="voice-list">
-        {filtered.length === 0 && (
-          <div className="voice-empty">
-            {query ? `No voices match “${query}”` : 'No voices available'}
-          </div>
-        )}
-        {filtered.map((v) => {
-          const isSelected = v.id === value;
-          const isPlaying = v.id === playingId;
-          const isLoading = v.id === loadingId;
-          const state: 'idle' | 'loading' | 'playing' = isLoading
-            ? 'loading'
-            : isPlaying
-              ? 'playing'
-              : 'idle';
-          return (
-            <div
-              key={v.id}
-              className={`voice-card${isSelected ? ' selected' : ''}${isPlaying ? ' live' : ''}`}
-              onClick={() => onChange(v.id)}
+      <div className="voice-split">
+        {/* LEFT: language rail */}
+        <div className="voice-langrail" role="tablist" aria-label="Language">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={langFilter === 'all'}
+            className={`lang-row${langFilter === 'all' ? ' active' : ''}`}
+            onClick={() => setLangFilter('all')}
+            title="Show every language"
+          >
+            <span className="lang-row-badge" aria-hidden>🌐</span>
+            <span className="lang-row-name">All</span>
+            <span className="lang-row-count">{voices.length}</span>
+          </button>
+          {languages.map(({ lang, count }) => (
+            <button
+              key={lang}
+              type="button"
+              role="tab"
+              aria-selected={langFilter === lang}
+              className={`lang-row${langFilter === lang ? ' active' : ''}`}
+              onClick={() => setLangFilter(lang)}
+              title={lang}
             >
-              <span className="voice-shimmer" aria-hidden />
-              <div className={`voice-avatar body-${v.gender}`}>
-                {v.displayName.charAt(0).toUpperCase()}
-              </div>
-              <div className="voice-meta">
-                <div className="voice-top">
-                  <span className="voice-display">{v.displayName}</span>
-                  {isSelected && <span className="voice-check" aria-label="selected" />}
-                </div>
-                <div className="voice-bottom">
-                  <span className="voice-lang">{v.language}</span>
-                  <span className="voice-dot" />
-                  <span className="voice-sex">{v.gender === 'F' ? 'female' : 'male'}</span>
-                  <span className="voice-spacer" />
-                  <GradePips tier={gradeTier(v.grade)} />
-                </div>
-              </div>
+              <span className="lang-row-badge" aria-hidden>{langBadge(lang)}</span>
+              <span className="lang-row-name">{shortLang(lang)}</span>
+              <span className="lang-row-count">{count}</span>
+            </button>
+          ))}
+        </div>
+
+        {/* RIGHT: voices for the selected language */}
+        <div className="voice-rightpane">
+          {showBackendChips && (
+            <div className="voice-engine-row">
               <button
                 type="button"
-                className={`voice-play-lg${isPlaying ? ' playing' : ''}${isLoading ? ' loading' : ''}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  play(v);
-                }}
-                aria-label={isPlaying ? 'Stop sample' : 'Play sample'}
+                className={`lang-chip${backendFilter === 'all' ? ' active' : ''}`}
+                onClick={() => setBackendFilter('all')}
+                title="Show every voice across all engines"
               >
-                <PlayGlyph state={state} />
+                All engines <span className="lang-count">{langScopedVoices.length}</span>
               </button>
+              {activeBackends.map((b) => (
+                <button
+                  key={b}
+                  type="button"
+                  className={`lang-chip${backendFilter === b ? ' active' : ''}`}
+                  onClick={() => setBackendFilter(b)}
+                  title={BACKEND_LABELS[b].hint}
+                >
+                  {BACKEND_LABELS[b].label} <span className="lang-count">{backendCounts[b]}</span>
+                </button>
+              ))}
             </div>
-          );
-        })}
+          )}
+
+          <div className="voice-list">
+            {filtered.length === 0 && (
+              <div className="voice-empty">
+                {query ? `No voices match “${query}”` : 'No voices available'}
+              </div>
+            )}
+            {filtered.map((v) => {
+              const isSelected = v.id === value;
+              const isPlaying = v.id === playingId;
+              const isLoading = v.id === loadingId;
+              const state: 'idle' | 'loading' | 'playing' = isLoading
+                ? 'loading'
+                : isPlaying
+                  ? 'playing'
+                  : 'idle';
+              return (
+                <div
+                  key={v.id}
+                  className={`voice-card${isSelected ? ' selected' : ''}${isPlaying ? ' live' : ''}`}
+                  onClick={() => onChange(v.id)}
+                >
+                  <span className="voice-shimmer" aria-hidden />
+                  <div className={`voice-avatar body-${v.gender}`}>
+                    {v.displayName.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="voice-meta">
+                    <div className="voice-top">
+                      <span className="voice-display">{v.displayName}</span>
+                      {isSelected && <span className="voice-check" aria-label="selected" />}
+                    </div>
+                    <div className="voice-bottom">
+                      <span className="voice-flag" aria-hidden>{langBadge(v.language)}</span>
+                      <span className="voice-lang">{v.language}</span>
+                      <span className="voice-dot" />
+                      <span className="voice-sex">{v.gender === 'F' ? 'female' : 'male'}</span>
+                      <span className="voice-spacer" />
+                      {isPlaying ? <Waveform /> : <GradePips tier={gradeTier(v.grade)} />}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className={`voice-play-lg${isPlaying ? ' playing' : ''}${isLoading ? ' loading' : ''}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      play(v);
+                    }}
+                    aria-label={isPlaying ? 'Stop sample' : 'Play sample'}
+                  >
+                    <PlayGlyph state={state} />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </div>
     </div>
   );
