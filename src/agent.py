@@ -87,7 +87,10 @@ from tts import (  # noqa: E402
     KokoroTTS,
     OrpheusConfig,
     OrpheusTTS,
+    SupertonicConfig,
+    SupertonicTTS,
     backend_for,
+    supertonic_style_for,
     is_known_voice,
     stt_language_for,
 )
@@ -482,6 +485,26 @@ async def entrypoint(ctx):
                 base_url=config.orpheus_base_url,
                 model=config.orpheus_model,
                 voice=voice,
+            )
+        )
+    elif backend == "supertonic":
+        if not config.supertonic_base_url:
+            raise RuntimeError(
+                f"Voice {voice!r} requires the Supertonic backend, but "
+                "SUPERTONIC_BASE_URL is not set."
+            )
+        # No word timestamps from Supertonic → lipsync falls back to
+        # amplitude-driven jaw-only (same as Orpheus). The server `voice`
+        # is the bare style (F1..M5); the spoken language is a separate
+        # `lang` field, derived from the session language (which itself
+        # comes from the voice id, e.g. el_F2 → "el").
+        tts_engine = SupertonicTTS(
+            SupertonicConfig(
+                base_url=config.supertonic_base_url,
+                model=config.supertonic_model,
+                voice=supertonic_style_for(voice),
+                speed=config.supertonic_speed,
+                lang=language,
             )
         )
     else:
