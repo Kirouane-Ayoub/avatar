@@ -242,8 +242,9 @@ def build_system_prompt(
     """Assemble the full system prompt for a session.
 
     Inputs are intentionally narrow: identity (who the avatar is and who
-    they're talking to), backend ("kokoro"|"orpheus" — selects whether to
-    mention vocal emotion tags), language (locks reply language to match
+    they're talking to), backend ("kokoro"|"orpheus"|"supertonic" — only
+    "orpheus" gets the vocal-emotion-tag block), language (locks reply
+    language to match
     TTS), recalled_memory (free-form text from MemoryProvider.recall,
     Mem0's distilled facts — may be ""), recent_turns (chronological
     list of auth.Transcript objects from the previous session — verbatim
