@@ -23,7 +23,7 @@ export interface ToolDef {
   description: string;
 }
 
-export type VoiceBackend = 'kokoro' | 'orpheus';
+export type VoiceBackend = 'kokoro' | 'orpheus' | 'supertonic';
 
 export interface VoiceInfo {
   id: string;
