@@ -117,16 +117,85 @@ ORPHEUS_VOICES = {
 }
 
 
+# Supertonic voice catalog (supertone-inc/supertonic). The server's `voice`
+# param is a timbre/style preset (F1-F5 female, M1-M5 male); the spoken
+# LANGUAGE is controlled independently via the request's `lang` field. The
+# rest of the app keys everything off a single voice id, so we expose one
+# app-level voice id per (language × style) pair and carry the decoded
+# `style` + `stt` (Whisper/lang code) on each entry:
+#   English styles keep bare ids (F1..M5);
+#   other languages are prefixed (el_F1..el_M5 for Greek).
+# The style name carries no language signal, so we MUST resolve these via
+# explicit lookup before the Kokoro single-letter prefix heuristic (which
+# would misread "F"/"M"/"el_" as French/Spanish). Sample rate is 44.1kHz
+# (vs 24kHz for the others); the plugin declares that and LiveKit resamples.
+_SUPERTONIC_STYLES = {
+    "F1": ("F", "warm, natural"),
+    "F2": ("F", "bright, friendly"),
+    "F3": ("F", "soft, gentle"),
+    "F4": ("F", "expressive, lively"),
+    "F5": ("F", "calm, mellow"),
+    "M1": ("M", "clear, neutral"),
+    "M2": ("M", "warm, grounded"),
+    "M3": ("M", "deep, steady"),
+    "M4": ("M", "energetic, upbeat"),
+    "M5": ("M", "smooth, relaxed"),
+}
+
+# (lang code, display label). Add a row here to expose another of
+# Supertonic's 31 languages — the catalog and all routing follow.
+_SUPERTONIC_LANGS = [
+    ("en", "English"),
+    ("el", "Greek"),
+]
+
+
+def _build_supertonic_voices() -> dict:
+    out: dict = {}
+    for code, label in _SUPERTONIC_LANGS:
+        for style, (gender, desc) in _SUPERTONIC_STYLES.items():
+            # English keeps the bare style id for back-compat; other langs
+            # are prefixed so ids stay unique across languages.
+            vid = style if code == "en" else f"{code}_{style}"
+            out[vid] = {
+                "language": label,
+                "gender": gender,
+                "grade": "",
+                "stt": code,
+                "style": style,
+                "description": desc,
+            }
+    return out
+
+
+SUPERTONIC_VOICES = _build_supertonic_voices()
+
+
+def supertonic_style_for(voice_id: str) -> str:
+    """The Supertonic server `voice` (style) param for an app voice id —
+    strips any language prefix (e.g. 'el_F2' -> 'F2'). Falls back to the id
+    itself for safety."""
+    meta = SUPERTONIC_VOICES.get(voice_id)
+    return meta["style"] if meta else voice_id
+
+
 def backend_for(voice_id: str) -> str:
-    """Return 'orpheus' or 'kokoro' for a known voice id; 'kokoro' as a safe
-    default. The agent uses this to pick the right TTS implementation."""
+    """Return 'orpheus', 'supertonic', or 'kokoro' for a known voice id;
+    'kokoro' as a safe default. The agent uses this to pick the right TTS
+    implementation."""
     if voice_id in ORPHEUS_VOICES:
         return "orpheus"
+    if voice_id in SUPERTONIC_VOICES:
+        return "supertonic"
     return "kokoro"
 
 
 def is_known_voice(voice_id: str) -> bool:
-    return voice_id in KOKORO_VOICES or voice_id in ORPHEUS_VOICES
+    return (
+        voice_id in KOKORO_VOICES
+        or voice_id in ORPHEUS_VOICES
+        or voice_id in SUPERTONIC_VOICES
+    )
 
 
 # Voice-id prefix → STT/Whisper language code.
@@ -151,4 +220,8 @@ def stt_language_for(voice_id: str, fallback: str = "en") -> str:
         return fallback
     if voice_id in ORPHEUS_VOICES:
         return ORPHEUS_VOICES[voice_id].get("stt", fallback)
+    # Supertonic before the prefix heuristic: "F1".."M5" would otherwise be
+    # misread as French ("f") / Mandarin-ish via the single-letter map.
+    if voice_id in SUPERTONIC_VOICES:
+        return SUPERTONIC_VOICES[voice_id].get("stt", fallback)
     return _LANG_BY_PREFIX.get(voice_id[:1].lower(), fallback)
