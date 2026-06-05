@@ -8,9 +8,11 @@ services:
     # it, anyone on the network can join rooms with a forged token.
     # Drop the `127.0.0.1:` prefix only when fronting with a TLS proxy.
     ports:
-      - "127.0.0.1:7880:7880"
-      - "127.0.0.1:7881:7881"
-      - "127.0.0.1:7882:7882/udp"
+      # LAN-exposed for same-network testing (browser connects to LiveKit
+      # directly for media). Revert to 127.0.0.1: for localhost-only.
+      - "0.0.0.0:7880:7880"
+      - "0.0.0.0:7881:7881"
+      - "0.0.0.0:7882:7882/udp"
     command: --dev --bind 0.0.0.0 --node-ip 0.0.0.0
     networks:
       - avatar-network
@@ -117,7 +119,9 @@ services:
     # publicly, drop the prefix and front with a TLS proxy that handles
     # auth-rate-limit + HSTS.
     ports:
-      - "127.0.0.1:3000:3000"
+      # LAN-exposed for same-network testing. Revert to 127.0.0.1: for
+      # localhost-only (and front with a TLS proxy before any real deploy).
+      - "0.0.0.0:3000:3000"
     volumes:
       # Cache HuggingFace embedding model across container rebuilds —
       # without this, every `docker-compose up --build` re-downloads
