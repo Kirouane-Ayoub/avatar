@@ -32,6 +32,13 @@ interface Props {
   // Wizard is per-avatar so this is the "switch companion" affordance.
   // Per-avatar "Forget memory" lives on the picker cards, not here.
   onBackToPicker?: () => void;
+  // Large-format vertical touch screen (kiosk): full-bleed avatar + a
+  // floating control dock / config sheet placed in the reachable band.
+  kiosk?: boolean;
+  // Persisted kiosk avatar framing (head / upper / full) + setter, so it can
+  // be changed from the UI and shared with the in-call session.
+  kioskView?: PreviewView;
+  onKioskViewChange?: (v: PreviewView) => void;
 }
 
 type PreviewView = 'head' | 'upper' | 'full';
@@ -43,7 +50,8 @@ const VIEW_OPTIONS: { id: PreviewView; label: string }[] = [
 
 export function AvatarEditor({
   setup, onChange, onStart, starting, error,
-  user, onLogout, onDeleteAccount, onBackToPicker,
+  user, onLogout, onDeleteAccount, onBackToPicker, kiosk = false,
+  kioskView, onKioskViewChange,
 }: Props) {
   // Type-the-username + re-enter-password confirmation prevents both
   // accidental account loss AND a stolen-JWT remote wipe.
@@ -68,7 +76,9 @@ export function AvatarEditor({
 
   const [micId, setMicId] = useState<string>('');
   const [camId, setCamId] = useState<string>('');
-  const [view, setView] = useState<PreviewView>('full');
+  // Kiosk defaults to the head+upper framing (more engaging on a big vertical
+  // screen than a small full-body figure).
+  const [view, setView] = useState<PreviewView>(kiosk ? 'upper' : 'full');
   const [railCollapsed, setRailCollapsed] = useState(
     () => localStorage.getItem('avatar.railCollapsed') === '1',
   );
@@ -82,6 +92,11 @@ export function AvatarEditor({
   useEffect(() => {
     localStorage.setItem('avatar.formCollapsed', formCollapsed ? '1' : '0');
   }, [formCollapsed]);
+
+  // Kiosk: the config form is a sheet that slides up over the full-bleed
+  // avatar, into the reachable band. Closed by default so the avatar owns
+  // the screen until someone taps "Customize".
+  const [sheetOpen, setSheetOpen] = useState(false);
 
   const currentAvatar = AVATARS[setup.avatar] ?? AVATARS.brunette;
 
@@ -119,8 +134,40 @@ export function AvatarEditor({
     <div
       className={`builder${railCollapsed ? ' rail-collapsed' : ''}${
         formCollapsed ? ' form-collapsed' : ''
-      }`}
+      }${kiosk ? ' kiosk' : ''}${kiosk && sheetOpen ? ' sheet-open' : ''}`}
     >
+      {/* Kiosk dock — floats in the reachable band over the full-bleed
+          avatar. Avatar switch + Customize (opens the config sheet) +
+          Start. Only rendered in kiosk mode; CSS positions it via
+          --reach-offset. */}
+      {kiosk && (
+        <div className="kiosk-dock" role="toolbar" aria-label="Avatar controls">
+          <div className="kiosk-dock-name">
+            <span className="kiosk-dock-title">{currentAvatar.label}</span>
+            <span className="kiosk-dock-sub">{currentAvatar.body === 'F' ? 'female' : 'male'}</span>
+          </div>
+          <button
+            type="button"
+            className="kiosk-dock-btn"
+            onClick={() => setSheetOpen((v) => !v)}
+            aria-expanded={sheetOpen}
+          >
+            {sheetOpen ? 'Close' : 'Customize'}
+          </button>
+          <button
+            type="button"
+            className="kiosk-dock-btn primary"
+            disabled={!canStart}
+            onClick={() => onStart({ micId: micId || null, camId: camId || null })}
+          >
+            {starting ? 'Starting…' : 'Start'}
+          </button>
+        </div>
+      )}
+      {kiosk && sheetOpen && (
+        <div className="kiosk-backdrop" onClick={() => setSheetOpen(false)} aria-hidden />
+      )}
+
       {railCollapsed ? (
         <button
           type="button"
@@ -151,7 +198,37 @@ export function AvatarEditor({
 
       <div className="stage">
         <div className="stage-preview">
-          <TalkingHeadView avatar={currentAvatar} mood={setup.mood} view={view} />
+          <TalkingHeadView
+            avatar={currentAvatar}
+            mood={setup.mood}
+            view={kiosk && kioskView ? kioskView : view}
+          />
+          {/* Touch-friendly avatar prev/next — same action as ← → keys, for
+              touchscreens where the keyboard isn't always available. */}
+          <button
+            type="button"
+            className="avatar-nav avatar-nav-prev"
+            onClick={() => cycleAvatar(-1)}
+            aria-label="Previous avatar"
+            title="Previous avatar"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"
+              strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="m15 18-6-6 6-6" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            className="avatar-nav avatar-nav-next"
+            onClick={() => cycleAvatar(1)}
+            aria-label="Next avatar"
+            title="Next avatar"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"
+              strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="m9 18 6-6-6-6" />
+            </svg>
+          </button>
           <StageMoodStrip
             value={setup.mood}
             onChange={(mood) => onChange({ mood })}
@@ -169,24 +246,28 @@ export function AvatarEditor({
               </button>
             ))}
           </div>
-          <DevicePanel
-            cameraOn={setup.camera}
-            onCameraChange={(on) => onChange({ camera: on })}
-            micId={micId}
-            onMicChange={setMicId}
-            camId={camId}
-            onCamChange={setCamId}
-          />
+          {/* Stage device pills only off-kiosk; in kiosk the selectors
+              live in the Customize sheet instead (see below). */}
+          {!kiosk && (
+            <DevicePanel
+              cameraOn={setup.camera}
+              onCameraChange={(on) => onChange({ camera: on })}
+              micId={micId}
+              onMicChange={setMicId}
+              camId={camId}
+              onCamChange={setCamId}
+            />
+          )}
           <div className="stage-hud">
             <div className="stage-title">{currentAvatar.label}</div>
             <div className="stage-sub">
               {currentAvatar.body === 'F' ? 'female' : 'male'}
-              <span className="kbd-hint"> · ← → to cycle</span>
+              <span className="kbd-hint"> · ‹ › to switch</span>
             </div>
           </div>
         </div>
 
-        {formCollapsed ? (
+        {!kiosk && formCollapsed ? (
           <button
             type="button"
             className="panel-stub stub-right"
@@ -198,6 +279,15 @@ export function AvatarEditor({
           </button>
         ) : (
         <div className="stage-form">
+          {kiosk && (
+            <button
+              type="button"
+              className="kiosk-sheet-done"
+              onClick={() => setSheetOpen(false)}
+            >
+              Done
+            </button>
+          )}
           <button
             type="button"
             className="panel-toggle toggle-form"
@@ -235,6 +325,26 @@ export function AvatarEditor({
             </div>
           </div>
 
+          {kiosk && onKioskViewChange && (
+            <div className="form-field span-2 kiosk-framing-field">
+              <label>Framing</label>
+              <div className="mode-segment" role="radiogroup" aria-label="Avatar framing">
+                {VIEW_OPTIONS.map((v) => (
+                  <button
+                    key={v.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={(kioskView ?? 'upper') === v.id}
+                    className={`mode-seg${(kioskView ?? 'upper') === v.id ? ' active' : ''}`}
+                    onClick={() => onKioskViewChange(v.id)}
+                  >
+                    {v.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="form-grid">
             <div className="form-field">
               <label>Name</label>
@@ -263,6 +373,21 @@ export function AvatarEditor({
                 name={setup.name}
               />
             </div>
+
+            {kiosk && (
+              <div className="form-field span-2">
+                <label>Mic &amp; Camera</label>
+                <DevicePanel
+                  variant="sheet"
+                  cameraOn={setup.camera}
+                  onCameraChange={(on) => onChange({ camera: on })}
+                  micId={micId}
+                  onMicChange={setMicId}
+                  camId={camId}
+                  onCamChange={setCamId}
+                />
+              </div>
+            )}
 
             <div className="form-field span-2">
               <label>Abilities</label>
