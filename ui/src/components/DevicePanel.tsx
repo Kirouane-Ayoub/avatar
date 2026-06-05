@@ -8,10 +8,14 @@ interface Props {
   onMicChange: (id: string) => void;
   camId: string;
   onCamChange: (id: string) => void;
+  // 'stage' = floating pills over the avatar (default, desktop editor).
+  // 'sheet' = form rows for the kiosk Customize sheet.
+  variant?: 'stage' | 'sheet';
 }
 
 export function DevicePanel({
   cameraOn, onCameraChange, micId, onMicChange, camId, onCamChange,
+  variant = 'stage',
 }: Props) {
   const [mics, setMics] = useState<MediaDeviceInfo[]>([]);
   const [cams, setCams] = useState<MediaDeviceInfo[]>([]);
@@ -81,6 +85,65 @@ export function DevicePanel({
     };
   }, [previewStream]);
 
+  const micOptions = (
+    <>
+      {mics.length === 0 && <option value="">(no input)</option>}
+      {mics.map((m, i) => (
+        <option key={m.deviceId || i} value={m.deviceId}>
+          {m.label || `Microphone ${i + 1}`}
+        </option>
+      ))}
+    </>
+  );
+  const camOptions = (
+    <>
+      {cams.length === 0 && <option value="">(no camera)</option>}
+      {cams.map((c, i) => (
+        <option key={c.deviceId || i} value={c.deviceId}>
+          {c.label || `Camera ${i + 1}`}
+        </option>
+      ))}
+    </>
+  );
+
+  // Sheet variant — clean form rows for the kiosk Customize sheet.
+  if (variant === 'sheet') {
+    return (
+      <div className="sheet-devices">
+        <label className="sheet-device-row">
+          <span className="sheet-device-icon"><MicIcon size={18} /></span>
+          <select value={micId} onChange={(e) => onMicChange(e.target.value)} aria-label="Microphone">
+            {micOptions}
+          </select>
+        </label>
+        <div className="sheet-device-row">
+          <span className="sheet-device-icon"><CamIcon off={!cameraOn} size={18} /></span>
+          <button
+            type="button"
+            className={`sd-pill${cameraOn ? ' on' : ''}`}
+            onClick={() => onCameraChange(!cameraOn)}
+            aria-pressed={cameraOn}
+          >
+            {cameraOn ? 'On' : 'Off'}
+          </button>
+          <select
+            value={camId}
+            onChange={(e) => onCamChange(e.target.value)}
+            disabled={!cameraOn}
+            aria-label="Camera"
+          >
+            {camOptions}
+          </select>
+        </div>
+        {cameraOn && (
+          <div className="sheet-cam-preview">
+            <video ref={videoRef} autoPlay muted playsInline />
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <>
       <div className="stage-devices">
@@ -91,12 +154,7 @@ export function DevicePanel({
             onChange={(e) => onMicChange(e.target.value)}
             aria-label="Microphone"
           >
-            {mics.length === 0 && <option value="">(no input)</option>}
-            {mics.map((m, i) => (
-              <option key={m.deviceId || i} value={m.deviceId}>
-                {m.label || `Microphone ${i + 1}`}
-              </option>
-            ))}
+            {micOptions}
           </select>
         </label>
 
@@ -116,12 +174,7 @@ export function DevicePanel({
             disabled={!cameraOn}
             aria-label="Camera"
           >
-            {cams.length === 0 && <option value="">(no camera)</option>}
-            {cams.map((c, i) => (
-              <option key={c.deviceId || i} value={c.deviceId}>
-                {c.label || `Camera ${i + 1}`}
-              </option>
-            ))}
+            {camOptions}
           </select>
         </label>
       </div>
