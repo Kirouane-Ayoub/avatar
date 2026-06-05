@@ -10,6 +10,8 @@ interface Props {
   accent: ThemeAccent;
   onModeChange: (m: ThemeMode) => void;
   onAccentChange: (a: ThemeAccent) => void;
+  kiosk?: boolean;
+  onKioskChange?: (v: boolean) => void;
 }
 
 type Section = 'appearance' | 'profile';
@@ -28,6 +30,7 @@ const MODES: { id: ThemeMode; label: string; icon: ReactNode }[] = [
  */
 export function SettingsModal({
   open, onClose, username, mode, accent, onModeChange, onAccentChange,
+  kiosk = false, onKioskChange,
 }: Props) {
   const [section, setSection] = useState<Section>('appearance');
 
@@ -117,6 +120,27 @@ export function SettingsModal({
                   ))}
                 </div>
               </div>
+
+              {onKioskChange && (
+                <div className="settings-group">
+                  <div className="settings-label">Display</div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={kiosk}
+                    className={`settings-toggle${kiosk ? ' on' : ''}`}
+                    onClick={() => onKioskChange(!kiosk)}
+                  >
+                    <span className="settings-toggle-track"><span className="settings-toggle-thumb" /></span>
+                    <span className="settings-toggle-text">
+                      <span className="settings-toggle-title">Kiosk mode</span>
+                      <span className="settings-toggle-hint">
+                        Full-screen avatar + reachable control dock for large vertical touch screens
+                      </span>
+                    </span>
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
