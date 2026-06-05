@@ -62,26 +62,28 @@ const BACKEND_LABELS: Record<VoiceBackend, { label: string; hint: string }> = {
   },
 };
 
-// Flag / script badge per language label, so languages are scannable at a
-// glance in the rail and the cards. Falls back to a globe for anything
-// unmapped. Keys are the verbatim `language` values from /api/voices.
+// Short language code rendered as a styled chip (US, GR, EN…). We use codes
+// rather than flag emoji because many touch-screen / kiosk OSes (Windows,
+// some Linux/Android) don't ship the regional-indicator flag font, so 🇺🇸🇬🇷
+// render as blank boxes or letter pairs. Codes render on every device.
+// Keys are the verbatim `language` values from /api/voices.
 const LANG_BADGE: Record<string, string> = {
-  'American English': '🇺🇸',
-  'British English': '🇬🇧',
-  English: '🇬🇧',
-  Greek: '🇬🇷',
-  Japanese: '🇯🇵',
-  'Mandarin Chinese': '🇨🇳',
-  Spanish: '🇪🇸',
-  French: '🇫🇷',
-  German: '🇩🇪',
-  Italian: '🇮🇹',
-  Hindi: '🇮🇳',
-  Korean: '🇰🇷',
-  'Brazilian Portuguese': '🇧🇷',
+  'American English': 'US',
+  'British English': 'GB',
+  English: 'EN',
+  Greek: 'GR',
+  Japanese: 'JP',
+  'Mandarin Chinese': 'ZH',
+  Spanish: 'ES',
+  French: 'FR',
+  German: 'DE',
+  Italian: 'IT',
+  Hindi: 'HI',
+  Korean: 'KO',
+  'Brazilian Portuguese': 'BR',
 };
 function langBadge(language: string): string {
-  return LANG_BADGE[language] ?? '🌐';
+  return LANG_BADGE[language] ?? language.slice(0, 2).toUpperCase();
 }
 
 // Compact rail labels — drop redundant qualifiers so the narrow left
@@ -338,7 +340,13 @@ export function VoicePicker({ value, onChange, name }: Props) {
             onClick={() => setLangFilter('all')}
             title="Show every language"
           >
-            <span className="lang-row-badge" aria-hidden>🌐</span>
+            <span className="lang-row-badge globe" aria-hidden>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"
+                strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="9" />
+                <path d="M3 12h18M12 3c2.5 2.6 2.5 15.4 0 18M12 3c-2.5 2.6-2.5 15.4 0 18" />
+              </svg>
+            </span>
             <span className="lang-row-name">All</span>
             <span className="lang-row-count">{voices.length}</span>
           </button>
