@@ -35,6 +35,11 @@ interface Props {
   avatar: AvatarMeta;
   connection: ConnectionInfo;
   onExit: () => void;
+  // Large-format vertical touch screen: full-bleed avatar + a reachable
+  // control dock; the transcript becomes a toggleable sheet.
+  kiosk?: boolean;
+  // Persisted kiosk avatar framing (head / upper / full) — set in the editor.
+  kioskView?: 'head' | 'upper' | 'full';
 }
 
 const IDLE_GESTURES = ['side', 'index', 'ok'];
@@ -67,10 +72,14 @@ function metricClass(key: MetricKey, val: number) {
 }
 
 
-export function SessionView({ setup, avatar, connection, onExit }: Props) {
+export function SessionView({ setup, avatar, connection, onExit, kiosk = false, kioskView = 'upper' }: Props) {
   const [container, setContainer] = useState<HTMLDivElement | null>(null);
   const [mood, setMood] = useState<Mood>(setup.mood);
-  const { progress, error: avatarError, head } = useTalkingHead(container, avatar, mood);
+  // Kiosk: transcript/text-input sheet open/closed (controls live on the dock).
+  const [panelOpen, setPanelOpen] = useState(false);
+  const { progress, error: avatarError, head } = useTalkingHead(
+    container, avatar, mood, kiosk ? kioskView : 'full',
+  );
 
   const sessionArgs = useMemo(
     () => ({
@@ -100,10 +109,12 @@ export function SessionView({ setup, avatar, connection, onExit }: Props) {
     const delay = hasPose ? 2200 : 250;
     viewTimerRef.current = window.setTimeout(() => {
       const { hasGesture, hasPose } = turnCuesRef.current;
-      const view = hasPose ? 'full' : hasGesture ? 'upper' : 'head';
+      // Kiosk: keep the operator-chosen framing (full-body reads as a tiny
+      // figure on a big vertical screen); otherwise frame to the active cue.
+      const view = kiosk ? kioskView : hasPose ? 'full' : hasGesture ? 'upper' : 'head';
       try { head.setView(view); } catch { /* ignore */ }
     }, delay);
-  }, [head]);
+  }, [head, kiosk, kioskView]);
 
   useEffect(() => {
     return () => {
@@ -219,7 +230,7 @@ export function SessionView({ setup, avatar, connection, onExit }: Props) {
   }, [session, onExit]);
 
   return (
-    <div className="session">
+    <div className={`session${kiosk ? ' kiosk' : ''}${kiosk && panelOpen ? ' panel-open' : ''}`}>
       <div className="session-stage">
         <div ref={setContainer} className="th-stage" />
 
@@ -376,6 +387,52 @@ export function SessionView({ setup, avatar, connection, onExit }: Props) {
           </button>
         </form>
       </aside>
+
+      {kiosk && (
+        <div className="kiosk-dock session-dock" role="toolbar" aria-label="Call controls">
+          <button
+            type="button"
+            className={`kiosk-mic${session.micMuted ? ' off' : ' on'}`}
+            onClick={() => session.setMicMuted(!session.micMuted)}
+            disabled={session.status !== 'connected'}
+            aria-label={session.micMuted ? 'Unmute microphone' : 'Mute microphone'}
+          >
+            <MicIcon muted={session.micMuted} size={26} />
+          </button>
+          <button
+            type="button"
+            className={`kiosk-dock-icon${session.cameraOn ? ' on' : ''}`}
+            onClick={() => session.setCameraOn(!session.cameraOn)}
+            disabled={session.status !== 'connected'}
+            aria-label={session.cameraOn ? 'Turn camera off' : 'Turn camera on'}
+          >
+            <CamIcon off={!session.cameraOn} size={22} />
+          </button>
+          <button
+            type="button"
+            className={`kiosk-dock-pill${session.whisperMode ? ' on' : ''}`}
+            onClick={() => session.setWhisperMode(!session.whisperMode)}
+            disabled={session.status !== 'connected'}
+            aria-pressed={session.whisperMode}
+          >
+            Whisper
+          </button>
+          <button
+            type="button"
+            className="kiosk-dock-pill"
+            onClick={() => setPanelOpen((v) => !v)}
+            aria-expanded={panelOpen}
+          >
+            {panelOpen ? 'Close' : 'Transcript'}
+          </button>
+          <button type="button" className="kiosk-dock-leave" onClick={handleDisconnect}>
+            Leave
+          </button>
+        </div>
+      )}
+      {kiosk && panelOpen && (
+        <div className="kiosk-backdrop" onClick={() => setPanelOpen(false)} aria-hidden />
+      )}
     </div>
   );
 }
