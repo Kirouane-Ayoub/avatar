@@ -6,6 +6,7 @@ import { TOOL_CATALOG } from './data/tools';
 import { useAuth } from './hooks/useAuth';
 import { useLocalStorage } from './hooks/useLocalStorage';
 import { useTheme } from './hooks/useTheme';
+import { useKiosk } from './hooks/useKiosk';
 import { AvatarEditor } from './components/AvatarEditor';
 import { AvatarPickerScreen } from './components/AvatarPickerScreen';
 import { LoginScreen } from './components/LoginScreen';
@@ -52,6 +53,7 @@ export default function App() {
   // Theme (light/dark + accent) — owned once here, applied to <html> by the
   // hook, surfaced through the app-wide Settings modal.
   const theme = useTheme();
+  const kiosk = useKiosk();
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   // Seed the wizard's setup from the active avatar whenever the user
@@ -164,6 +166,9 @@ export default function App() {
         onLogout={auth.logout}
         onDeleteAccount={auth.deleteAccount}
         onBackToPicker={() => setActiveAvatar(null)}
+        kiosk={kiosk.kiosk}
+        kioskView={kiosk.view}
+        onKioskViewChange={kiosk.setView}
       />
     );
   } else {
@@ -173,6 +178,8 @@ export default function App() {
         avatar={avatar}
         connection={connection}
         onExit={() => setConnection(null)}
+        kiosk={kiosk.kiosk}
+        kioskView={kiosk.view}
       />
     );
   }
@@ -208,6 +215,8 @@ export default function App() {
         accent={theme.accent}
         onModeChange={theme.setMode}
         onAccentChange={theme.setAccent}
+        kiosk={kiosk.kiosk}
+        onKioskChange={kiosk.setKiosk}
       />
     </>
   );
