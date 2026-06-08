@@ -1259,6 +1259,88 @@ code {
   color: var(--on-stage-accent);
 }
 
+/* "Preview all moves" showcase control — bottom-left of the stage, the one
+   free corner (stage-hud top-left, view-toggle top-right, mood-strip
+   bottom-center, camera self-view bottom-right). Solid-ish bg (no
+   backdrop blur) per the WebGL-repaint note above. */
+.showcase {
+  position: absolute;
+  bottom: 14px;
+  left: 14px;
+  z-index: 5;
+}
+.showcase-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--stage-glass);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 999px;
+  padding: 6px 14px;
+  color: var(--on-stage-dim);
+  font: inherit;
+  font-size: 0.66rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.showcase-btn:hover {
+  color: var(--on-stage);
+  background: var(--stage-glass-border);
+}
+.showcase-running {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: var(--stage-glass);
+  border: 1px solid rgba(var(--accent-rgb), 0.4);
+  border-radius: 14px;
+  padding: 8px 12px;
+  min-width: 170px;
+}
+.showcase-now {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.showcase-kind {
+  font-size: 0.56rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--on-stage-dim);
+}
+.showcase-value {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--on-stage-accent);
+  text-transform: capitalize;
+}
+.showcase-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.showcase-count {
+  font-size: 0.6rem;
+  color: var(--on-stage-dim);
+  font-variant-numeric: tabular-nums;
+}
+.showcase-stop {
+  background: rgba(var(--accent-rgb), 0.2);
+  border: none;
+  border-radius: 999px;
+  padding: 3px 12px;
+  color: var(--on-stage-accent);
+  font: inherit;
+  font-size: 0.6rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.showcase-stop:hover { background: rgba(var(--accent-rgb), 0.32); }
+
 /* Touch-friendly avatar prev/next — large tap targets centered on the
    stage's left/right edges. Same action as the ← → keys, for touchscreens
    where the keyboard isn't handy. Work with mouse too. */
@@ -2600,6 +2682,7 @@ html[data-kiosk="1"] .toggle-rail,
 html[data-kiosk="1"] .toggle-form,
 html[data-kiosk="1"] .stage-mood-strip,
 html[data-kiosk="1"] .view-toggle,
+html[data-kiosk="1"] .showcase,
 html[data-kiosk="1"] .stage-devices,
 html[data-kiosk="1"] .stage-hud,
 html[data-kiosk="1"] .form-footer { display: none; }
