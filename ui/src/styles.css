@@ -1329,7 +1329,6 @@ code {
   font-size: 0.92rem;
   font-weight: 600;
   color: var(--on-stage-accent);
-  text-transform: capitalize;
 }
 .showcase-meta {
   display: flex;
@@ -2755,7 +2754,12 @@ html[data-kiosk="1"] .kiosk-dock-btn.primary {
 }
 html[data-kiosk="1"] .kiosk-dock-btn:disabled { opacity: 0.45; cursor: default; }
 
-/* Config sheet — slides up into the reach band, scrollable */
+/* Config sheet — slides up into the reach band, scrollable.
+   Top padding is 0: the sticky .kiosk-sheet-head owns the top edge and masks
+   content scrolling beneath it. scroll-padding-top keeps focused fields from
+   hiding under that header. overscroll-behavior stops the scroll from
+   chaining to the page behind the sheet; -webkit-overflow-scrolling gives
+   momentum on touch screens. */
 html[data-kiosk="1"] .stage-form {
   position: fixed;
   left: 50%;
@@ -2763,16 +2767,36 @@ html[data-kiosk="1"] .stage-form {
   transform: translateX(-50%) translateY(112%);
   width: min(680px, 92vw);
   max-height: 72vh;
-  padding: 0.4rem 1.2rem 1.2rem;
+  padding: 0 1.2rem 1.4rem;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 22px;
   box-shadow: 0 28px 70px rgba(0, 0, 0, 0.5);
+  /* Vertical scroll only — lock the x-axis so the sticky header's negative
+     margins (or any wide child) never trigger a left-right scrollbar. */
+  overflow-x: hidden;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scroll-padding-top: 88px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
   z-index: 45;
   opacity: 0;
   pointer-events: none;
-  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s;
+  transition: transform 0.34s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.22s;
+}
+/* Thin, inset scrollbar so the thumb floats clear of the 22px rounded
+   corners instead of jamming into them. */
+html[data-kiosk="1"] .stage-form::-webkit-scrollbar { width: 10px; }
+html[data-kiosk="1"] .stage-form::-webkit-scrollbar-track {
+  background: transparent;
+  margin: 12px 0;
+}
+html[data-kiosk="1"] .stage-form::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 999px;
+  border: 3px solid var(--surface);
 }
 html[data-kiosk="1"] .builder.sheet-open .stage-form {
   transform: translateX(-50%) translateY(0);
@@ -2783,13 +2807,33 @@ html[data-kiosk="1"] .kiosk-backdrop {
   position: fixed; inset: 0; z-index: 44;
   background: rgba(0, 0, 0, 0.4);
 }
-.kiosk-sheet-done {
+
+/* Sticky sheet header: grab-handle affordance + Done. Bleeds to the sheet's
+   padded edges (negative margin) with an opaque bg + hairline so scrolling
+   content disappears cleanly behind it rather than peeking past the button.
+   The sheet's overflow clip rounds its top corners for us. */
+.kiosk-sheet-head {
   position: sticky;
   top: 0;
-  margin: 0 0 0.4rem auto;
-  display: block;
+  z-index: 3;
+  margin: 0 -1.2rem 0.6rem;
+  padding: 10px 1.2rem 11px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.kiosk-sheet-grip {
+  width: 44px; height: 5px;
+  border-radius: 999px;
+  background: var(--border-strong);
+  align-self: center;
+}
+.kiosk-sheet-done {
+  align-self: flex-end;
   height: 44px;
-  padding: 0 20px;
+  padding: 0 22px;
   border-radius: 999px;
   background: var(--surface-3);
   border: 1px solid var(--border);
@@ -2798,7 +2842,53 @@ html[data-kiosk="1"] .kiosk-backdrop {
   font-weight: 600;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
+  transition: background 0.14s ease, border-color 0.14s ease, transform 0.08s ease;
 }
+.kiosk-sheet-done:hover { background: var(--surface-4); border-color: var(--border-strong); }
+.kiosk-sheet-done:active { transform: scale(0.97); }
+
+/* Kiosk "Preview all moves" trigger — lives in the Customize sheet; large
+   touch target, full sheet width. */
+.kiosk-preview-btn {
+  width: 100%;
+  height: 52px;
+  border-radius: 12px;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.14s ease, border-color 0.14s ease, transform 0.08s ease;
+}
+.kiosk-preview-btn:hover { background: var(--surface-4); border-color: var(--border-strong); }
+.kiosk-preview-btn:active:not(:disabled) { transform: scale(0.99); }
+.kiosk-preview-btn:disabled { opacity: 0.5; cursor: default; }
+
+/* Live status card while the kiosk showcase runs — floats in the lower reach
+   band over the full-bleed avatar once the sheet closes. Uses on-stage glass
+   tokens so it adapts to the themed stage. */
+html[data-kiosk="1"] .kiosk-showcase {
+  position: fixed;
+  left: 50%;
+  bottom: calc(20px + var(--reach-offset));
+  transform: translateX(-50%);
+  z-index: 46;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 280px;
+  padding: 14px 18px;
+  background: var(--stage-glass);
+  border: 1px solid var(--stage-glass-border);
+  border-radius: 16px;
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.32);
+  color: var(--on-stage);
+}
+html[data-kiosk="1"] .kiosk-showcase .showcase-value { font-size: 1.35rem; }
+html[data-kiosk="1"] .kiosk-showcase .showcase-stop { height: 40px; padding: 0 22px; font-size: 0.78rem; }
 
 /* ── Kiosk: in-call session view ─────────────────────────────────────────
    Full-bleed avatar + a reachable call-control dock; the transcript / text
