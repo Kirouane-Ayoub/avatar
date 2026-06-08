@@ -53,6 +53,21 @@
   --danger-bg:   color-mix(in srgb, var(--danger) 16%, var(--bg));
   --danger-bg-2: color-mix(in srgb, var(--danger) 30%, var(--bg));
 
+  /* success (green) + warn (amber) — same mode-adaptive recipe as danger,
+     so fixed light-green/amber text stops dying on the light-mode surface.
+     No [data-theme] override needed: every tint mixes with --text/--bg,
+     which already flip per mode. */
+  --success: #22c55e;
+  --success-rgb: 34, 197, 94;
+  --success-soft: color-mix(in srgb, var(--success) 70%, var(--text));
+  --success-100:  color-mix(in srgb, var(--success) 50%, var(--text));
+  --success-bg:   color-mix(in srgb, var(--success) 16%, var(--bg));
+  --success-bg-2: color-mix(in srgb, var(--success) 30%, var(--bg));
+  --warn: #f59e0b;
+  --warn-rgb: 245, 158, 11;
+  --warn-soft: color-mix(in srgb, var(--warn) 72%, var(--text));
+  --warn-100:  color-mix(in srgb, var(--warn) 52%, var(--text));
+
   /* Chrome that floats over the THEMED avatar stage (device overlay, view
      toggle, mood strip, metrics/badge/tool pills). The stage background is
      themed (.stage-preview = var(--bg) gradient), so the glass + text adapt
@@ -304,9 +319,9 @@ code {
   flex-shrink: 0;
   letter-spacing: 0;
 }
-.rail-card-badge.cat-w { background: rgba(236, 72, 153, 0.12); color: #f9a8d4; }
-.rail-card-badge.cat-m { background: rgba(59, 130, 246, 0.12); color: #93c5fd; }
-.rail-card-badge.cat-a { background: rgba(168, 85, 247, 0.14); color: #d8b4fe; }
+.rail-card-badge.cat-w { background: rgba(236, 72, 153, 0.12); color: color-mix(in srgb, #ec4899 58%, var(--text)); }
+.rail-card-badge.cat-m { background: rgba(59, 130, 246, 0.12); color: color-mix(in srgb, #3b82f6 58%, var(--text)); }
+.rail-card-badge.cat-a { background: rgba(168, 85, 247, 0.14); color: color-mix(in srgb, #a855f7 58%, var(--text)); }
 .rail-card.active .rail-card-badge.cat-w { background: rgba(236, 72, 153, 0.22); }
 .rail-card.active .rail-card-badge.cat-m { background: rgba(59, 130, 246, 0.22); }
 .rail-card.active .rail-card-badge.cat-a { background: rgba(168, 85, 247, 0.24); }
@@ -361,7 +376,7 @@ code {
   text-align: left;
   padding: 0.35rem 0.75rem;
   background: var(--stage-glass);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--stage-glass-border);
   border-radius: 999px;
   pointer-events: none;
   display: inline-flex; align-items: center; gap: 8px;
@@ -407,7 +422,7 @@ code {
   border-radius: 10px;
   backdrop-filter: blur(6px);
 }
-.th-status.error { color: var(--danger-100); background: rgba(127, 29, 29, 0.7); }
+.th-status.error { color: var(--danger-100); background: var(--danger-bg); }
 
 /* ── Form (right of preview) ── */
 .stage-form {
@@ -599,7 +614,7 @@ code {
   font-size: 0.62rem;
   color: var(--text-faint);
 }
-.persona-charcount.warn { color: #facc15; }
+.persona-charcount.warn { color: var(--warn-soft); }
 .persona-charcount.over { color: var(--danger-soft); }
 
 .persona-field textarea {
@@ -1144,7 +1159,7 @@ code {
   /* Solid-ish bg instead of backdrop-filter: blur over a constantly-
      repainting WebGL canvas was tanking framerate of the avatar idle. */
   background: var(--stage-glass);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--stage-glass-border);
   border-radius: 999px;
   padding: 3px 8px 3px 4px;
   color: var(--on-stage-dim);
@@ -1156,7 +1171,7 @@ code {
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--stage-glass-border);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1203,7 +1218,7 @@ code {
 .stage-mood-chips {
   display: inline-flex; gap: 2px; padding: 3px;
   background: var(--stage-glass);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--stage-glass-border);
   border-radius: 999px;
 }
 .stage-mood-chip {
@@ -1237,7 +1252,7 @@ code {
   padding: 3px;
   /* Solid bg — see .sd-item note re: backdrop-filter over WebGL. */
   background: var(--stage-glass);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--stage-glass-border);
   border-radius: 999px;
   z-index: 3;
 }
@@ -1274,7 +1289,7 @@ code {
   align-items: center;
   gap: 6px;
   background: var(--stage-glass);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--stage-glass-border);
   border-radius: 999px;
   padding: 6px 14px;
   color: var(--on-stage-dim);
@@ -1376,8 +1391,8 @@ code {
 }
 
 .sd-pill {
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: var(--stage-glass);
+  border: 1px solid var(--stage-glass-border);
   color: var(--on-stage-dim);
   font-family: inherit;
   font-size: 0.55rem;
@@ -1389,7 +1404,7 @@ code {
   cursor: pointer;
   transition: all 0.12s;
 }
-.sd-pill:hover { background: rgba(255, 255, 255, 0.16); color: var(--on-stage); }
+.sd-pill:hover { background: color-mix(in srgb, var(--accent) 16%, var(--stage-glass)); color: var(--on-stage); }
 .sd-pill.on {
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
   border-color: transparent;
@@ -1493,9 +1508,9 @@ code {
   margin: 0 0 12px;
   padding: 8px 12px;
   border-radius: 8px;
-  background: rgba(34, 197, 94, 0.12);
-  border: 1px solid rgba(34, 197, 94, 0.25);
-  color: #d1fae5;
+  background: var(--success-bg);
+  border: 1px solid var(--success-bg-2);
+  color: var(--success-100);
   font-size: 0.78rem;
 }
 .start-btn {
@@ -1553,7 +1568,7 @@ code {
   border-radius: 999px;
   background: var(--stage-glass-blur);
   backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--stage-glass-border);
   font-size: 0.62rem;
   color: var(--on-stage);
   z-index: 2;
@@ -1590,7 +1605,7 @@ code {
   border-radius: 999px;
   background: var(--stage-glass-blur);
   backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--stage-glass-border);
   z-index: 2;
 }
 .session-metrics .metric {
@@ -1612,8 +1627,8 @@ code {
   color: var(--on-stage-dim);
   letter-spacing: -0.02em;
 }
-.metric-value.good { color: #4ade80; }
-.metric-value.ok   { color: #fbbf24; }
+.metric-value.good { color: var(--success-soft); }
+.metric-value.ok   { color: var(--warn-soft); }
 .metric-value.slow { color: var(--danger-soft); }
 .metric-value.idle { color: var(--on-stage-faint); }
 
@@ -1741,13 +1756,13 @@ code {
   color: var(--text);
 }
 .icon-btn.on {
-  background: rgba(34, 197, 94, 0.14);
-  border-color: rgba(34, 197, 94, 0.4);
-  color: #86efac;
+  background: rgba(var(--success-rgb), 0.14);
+  border-color: rgba(var(--success-rgb), 0.4);
+  color: var(--success-100);
 }
 .icon-btn.on:hover:not(:disabled) {
-  background: rgba(34, 197, 94, 0.22);
-  border-color: rgba(34, 197, 94, 0.6);
+  background: rgba(var(--success-rgb), 0.22);
+  border-color: rgba(var(--success-rgb), 0.6);
 }
 .icon-btn.off {
   background: rgba(var(--danger-rgb), 0.14);
@@ -1775,7 +1790,7 @@ code {
   transition: all 0.12s;
 }
 .whisper-pill:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--border);
   border-color: var(--border-strong);
   color: var(--text);
 }
@@ -2100,22 +2115,20 @@ code {
 
 .user-menu-trigger {
   display: inline-flex; align-items: center; gap: 10px;
-  background: rgba(24, 24, 28, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   border-radius: 999px; padding: 4px 12px 4px 4px;
   color: var(--text); font: inherit; font-size: 0.85rem; line-height: 1;
   cursor: pointer;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
   transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
 }
 .user-menu-trigger:hover {
-  background: rgba(36, 36, 42, 0.8);
-  border-color: rgba(255, 255, 255, 0.1);
+  background: var(--surface-4);
+  border-color: var(--border-strong);
 }
 .user-menu-trigger:active { transform: scale(0.98); }
 .user-menu-trigger.open {
-  background: rgba(36, 36, 42, 0.85);
+  background: var(--surface-4);
   border-color: rgba(var(--accent-rgb), 0.4);
   box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.12);
 }
@@ -2139,20 +2152,17 @@ code {
 .user-menu-pop {
   position: absolute; top: calc(100% + 8px); right: 0;
   min-width: 240px; z-index: 100;
-  background: rgba(20, 20, 24, 0.85);
-  backdrop-filter: blur(24px) saturate(180%);
-  -webkit-backdrop-filter: blur(24px) saturate(180%);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 14px;
   padding: 6px;
   display: flex; flex-direction: column;
-  /* Multi-layer shadow: subtle inset highlight at top, soft drop shadow,
-     and a tighter dark shadow underneath for depth. */
+  /* Soft layered drop shadow for depth — neutral enough to read on both
+     light and dark surfaces. */
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.06),
-    0 1px 2px rgba(0, 0, 0, 0.4),
-    0 8px 24px rgba(0, 0, 0, 0.5),
-    0 16px 48px rgba(0, 0, 0, 0.3);
+    0 1px 2px rgba(0, 0, 0, 0.08),
+    0 8px 24px rgba(0, 0, 0, 0.18),
+    0 16px 48px rgba(0, 0, 0, 0.2);
   animation: user-menu-fade 0.14s cubic-bezier(0.2, 0.8, 0.2, 1);
   transform-origin: top right;
 }
@@ -2171,14 +2181,14 @@ code {
 }
 .user-menu-item svg { flex-shrink: 0; opacity: 0.7; transition: opacity 0.1s ease; }
 .user-menu-item:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-3);
   color: var(--text-strong);
 }
 .user-menu-item:hover svg { opacity: 1; }
 
 .user-menu-sep {
   height: 1px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--border);
   margin: 4px 6px;
 }
 
@@ -2272,18 +2282,15 @@ code {
 .cd-card {
   position: relative;
   width: 100%; max-width: 440px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0)) ,
-    rgba(20, 20, 24, 0.92);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 18px;
   padding: 28px 26px 22px;
   display: flex; flex-direction: column;
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.06),
-    0 1px 2px rgba(0, 0, 0, 0.5),
-    0 24px 60px rgba(0, 0, 0, 0.55),
-    0 4px 14px rgba(0, 0, 0, 0.45);
+    0 1px 2px rgba(0, 0, 0, 0.08),
+    0 12px 32px rgba(0, 0, 0, 0.18),
+    0 24px 60px rgba(0, 0, 0, 0.22);
   animation: cd-pop 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
   transform-origin: center;
 }
@@ -2322,8 +2329,8 @@ code {
   font-size: 0.76rem; color: var(--text-soft); letter-spacing: 0.01em;
 }
 .cd-field > span code {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--surface-3);
+  border: 1px solid var(--border);
   border-radius: 5px;
   padding: 1px 6px;
   color: var(--text-strong);
@@ -2331,8 +2338,8 @@ code {
   font-size: 0.78rem;
 }
 .cd-field input {
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
   border-radius: 9px;
   padding: 10px 12px;
   color: var(--text-strong);
@@ -2342,8 +2349,8 @@ code {
 }
 .cd-field input::placeholder { color: var(--text-faint); }
 .cd-field input:focus {
-  border-color: rgba(248, 113, 113, 0.55);
-  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(var(--danger-rgb), 0.55);
+  background: var(--surface-2);
   box-shadow: 0 0 0 3px rgba(var(--danger-rgb), 0.12);
 }
 .cd-card:not(.cd-danger) .cd-field input:focus {
@@ -2366,19 +2373,19 @@ code {
 .cd-btn:disabled { cursor: not-allowed; opacity: 0.55; }
 
 .cd-cancel {
-  background: rgba(255, 255, 255, 0.04);
-  border-color: rgba(255, 255, 255, 0.08);
+  background: var(--surface-2);
+  border-color: var(--border);
   color: var(--text-dim);
 }
 .cd-cancel:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.14);
+  background: var(--surface-4);
+  border-color: var(--border-strong);
   color: var(--text-strong);
 }
 
 .cd-confirm {
   background: var(--accent); color: #fff;
-  border-color: rgba(255, 255, 255, 0.08);
+  border-color: transparent;
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.12) inset,
               0 4px 14px rgba(var(--accent-rgb), 0.3);
 }
