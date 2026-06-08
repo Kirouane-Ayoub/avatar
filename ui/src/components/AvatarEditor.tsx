@@ -5,6 +5,7 @@ import { AVATARS } from '../data/avatars';
 import { TOOL_CATALOG } from '../data/tools';
 import { AvatarPicker } from './AvatarPicker';
 import { TalkingHeadView } from './TalkingHeadView';
+import { AvatarShowcase } from './AvatarShowcase';
 import { StageMoodStrip } from './StageMoodStrip';
 import { VoicePicker } from './VoicePicker';
 import { PersonaField } from './PersonaField';
@@ -76,6 +77,9 @@ export function AvatarEditor({
 
   const [micId, setMicId] = useState<string>('');
   const [camId, setCamId] = useState<string>('');
+  // Loaded TalkingHead instance, lifted from the preview so the "preview all
+  // moves" showcase can drive it imperatively.
+  const [previewHead, setPreviewHead] = useState<TalkingHeadInstance | null>(null);
   // Kiosk defaults to the head+upper framing (more engaging on a big vertical
   // screen than a small full-body figure).
   const [view, setView] = useState<PreviewView>(kiosk ? 'upper' : 'full');
@@ -202,6 +206,7 @@ export function AvatarEditor({
             avatar={currentAvatar}
             mood={setup.mood}
             view={kiosk && kioskView ? kioskView : view}
+            onHead={setPreviewHead}
           />
           {/* Touch-friendly avatar prev/next — same action as ← → keys, for
               touchscreens where the keyboard isn't always available. */}
@@ -246,6 +251,13 @@ export function AvatarEditor({
               </button>
             ))}
           </div>
+          {/* "Preview all moves" — cycles through every mood/gesture/pose so
+              the user can see the avatar's full range before picking it. */}
+          <AvatarShowcase
+            head={previewHead}
+            restoreView={kiosk && kioskView ? kioskView : view}
+            restoreMood={setup.mood}
+          />
           {/* Stage device pills only off-kiosk; in kiosk the selectors
               live in the Customize sheet instead (see below). */}
           {!kiosk && (
