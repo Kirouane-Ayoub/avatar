@@ -6,6 +6,7 @@ import { TOOL_CATALOG } from '../data/tools';
 import { AvatarPicker } from './AvatarPicker';
 import { TalkingHeadView } from './TalkingHeadView';
 import { AvatarShowcase } from './AvatarShowcase';
+import { useAvatarShowcase, KIND_LABEL } from '../hooks/useAvatarShowcase';
 import { StageMoodStrip } from './StageMoodStrip';
 import { VoicePicker } from './VoicePicker';
 import { PersonaField } from './PersonaField';
@@ -104,6 +105,15 @@ export function AvatarEditor({
 
   const currentAvatar = AVATARS[setup.avatar] ?? AVATARS.brunette;
 
+  // Showcase state is held here (not inside AvatarShowcase) so kiosk mode can
+  // trigger it from the Customize sheet while the live status card renders on
+  // the full-bleed avatar after the sheet closes.
+  const showcase = useAvatarShowcase(previewHead, {
+    restoreView: kiosk && kioskView ? kioskView : view,
+    restoreMood: setup.mood,
+    lipsyncScale: currentAvatar.lipsyncScale,
+  });
+
   const cycleAvatar = useCallback(
     (dir: 1 | -1) => {
       const keys = Object.keys(AVATARS);
@@ -147,8 +157,16 @@ export function AvatarEditor({
       {kiosk && (
         <div className="kiosk-dock" role="toolbar" aria-label="Avatar controls">
           <div className="kiosk-dock-name">
-            <span className="kiosk-dock-title">{currentAvatar.label}</span>
-            <span className="kiosk-dock-sub">{currentAvatar.body === 'F' ? 'female' : 'male'}</span>
+            {/* Show the companion's chosen name (its identity) — fall back to
+                the avatar model label only when unnamed. The look is visible
+                on screen and cycles with the arrows, so the name slot belongs
+                to the companion, not the model. */}
+            <span className="kiosk-dock-title">
+              {setup.name.trim() && setup.name.trim() !== 'Companion'
+                ? setup.name.trim()
+                : currentAvatar.label}
+            </span>
+            <span className="kiosk-dock-sub">{currentAvatar.body === 'F' ? 'Female' : 'Male'}</span>
           </div>
           <button
             type="button"
@@ -252,12 +270,26 @@ export function AvatarEditor({
             ))}
           </div>
           {/* "Preview all moves" — cycles through every mood/gesture/pose so
-              the user can see the avatar's full range before picking it. */}
-          <AvatarShowcase
-            head={previewHead}
-            restoreView={kiosk && kioskView ? kioskView : view}
-            restoreMood={setup.mood}
-          />
+              the user can see the avatar's full range before picking it.
+              Off-kiosk it's a stage control; in kiosk the trigger lives in the
+              Customize sheet and only the running card floats over the stage. */}
+          {!kiosk && previewHead && <AvatarShowcase {...showcase} />}
+          {kiosk && showcase.current && (
+            <div className="kiosk-showcase" role="status" aria-live="polite">
+              <div className="showcase-now">
+                <span className="showcase-kind">{KIND_LABEL[showcase.current.step.kind]}</span>
+                <span className="showcase-value">{showcase.current.label}</span>
+              </div>
+              <div className="showcase-meta">
+                <span className="showcase-count">
+                  {showcase.current.index} / {showcase.current.total}
+                </span>
+                <button type="button" className="showcase-stop" onClick={showcase.stop}>
+                  Stop
+                </button>
+              </div>
+            </div>
+          )}
           {/* Stage device pills only off-kiosk; in kiosk the selectors
               live in the Customize sheet instead (see below). */}
           {!kiosk && (
@@ -292,13 +324,16 @@ export function AvatarEditor({
         ) : (
         <div className="stage-form">
           {kiosk && (
-            <button
-              type="button"
-              className="kiosk-sheet-done"
-              onClick={() => setSheetOpen(false)}
-            >
-              Done
-            </button>
+            <div className="kiosk-sheet-head">
+              <span className="kiosk-sheet-grip" aria-hidden />
+              <button
+                type="button"
+                className="kiosk-sheet-done"
+                onClick={() => setSheetOpen(false)}
+              >
+                Done
+              </button>
+            </div>
           )}
           <button
             type="button"
@@ -354,6 +389,22 @@ export function AvatarEditor({
                   </button>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* Kiosk: trigger the full-range preview, then close the sheet so the
+              avatar (and the floating status card) own the screen. */}
+          {kiosk && previewHead && (
+            <div className="form-field span-2">
+              <label>Preview moves</label>
+              <button
+                type="button"
+                className="kiosk-preview-btn"
+                disabled={showcase.running}
+                onClick={() => { showcase.start(); setSheetOpen(false); }}
+              >
+                ▶ Preview moods, gestures, poses &amp; lip sync
+              </button>
             </div>
           )}
 
