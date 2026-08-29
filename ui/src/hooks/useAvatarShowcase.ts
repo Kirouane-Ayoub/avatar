@@ -25,15 +25,16 @@ export interface ShowcaseState {
 // preview is quick; punctuation is stripped per word before phonemizing.
 const LIPSYNC_SAMPLE = 'Hey — watch my mouth move while I talk!';
 
-// One ordered run: every mood (face close-up), every gesture, every pose,
-// then a lip-sync demo. Moods/gestures/poses come from the canonical cue
-// vocabulary so they stay in sync with what the agent can emit.
+// One ordered run: every mood (face close-up), then the lip-sync demo (also a
+// face close-up — the two facial tests run back to back), then every gesture
+// and every pose. Moods/gestures/poses come from the canonical cue vocabulary
+// so they stay in sync with what the agent can emit.
 function buildRun(): ShowcaseStep[] {
   return [
     ...MOODS.map((value) => ({ kind: 'mood' as const, value })),
+    { kind: 'lipsync' as const, value: LIPSYNC_SAMPLE },
     ...GESTURES.map((value) => ({ kind: 'gesture' as const, value })),
     ...POSES.map((value) => ({ kind: 'pose' as const, value })),
-    { kind: 'lipsync' as const, value: LIPSYNC_SAMPLE },
   ];
 }
 
@@ -222,7 +223,15 @@ export function useAvatarShowcase(
       setCurrent({ step, label, index: i + 1, total: run.length });
       let holdMs: number;
       if (step.kind === 'lipsync') {
-        try { head.setView(VIEW_FOR.lipsync); head.setMood('neutral'); } catch { /* ignore */ }
+        // Reset to a standing pose + neutral face first: lip-sync is a HEAD
+        // close-up, and the preceding pose step may have left the avatar
+        // sitting/kneeling, which frames the face badly in head view.
+        try {
+          const tpl = head.poseTemplates?.['straight'];
+          if (tpl && head.setPoseFromTemplate) head.setPoseFromTemplate(tpl, 600);
+          head.setMood('neutral');
+          head.setView(VIEW_FOR.lipsync);
+        } catch { /* ignore */ }
         const demo = runLipsyncDemo(head, lipsyncScale);
         lipsyncCancelRef.current = demo.cancel;
         holdMs = demo.duration;
