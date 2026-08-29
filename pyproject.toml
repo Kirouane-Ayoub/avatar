@@ -49,3 +49,28 @@ packages = [
     "vision",
 ]
 package-dir = {"" = "src"}
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+# patches/speaches_stt.py is a vendored copy of an upstream speaches router,
+# bind-mounted into that container as-is (docker-compose.yml). It targets the
+# image's Python 3.12 and must stay diffable against upstream — not ours to
+# reformat.
+exclude = ["patches"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+ignore = [
+    # The formatter owns line length. E501 only fires on things it can't
+    # split anyway — long URLs, prompt strings, comment prose.
+    "E501",
+    # `with pool.connection() as conn:` / `with conn.cursor() as cur:` reads
+    # clearer nested than combined, and it's the idiomatic psycopg shape.
+    "SIM117",
+    # Em dashes, arrows and box-drawing characters are deliberate throughout
+    # the comments and log lines.
+    "RUF001",
+    "RUF002",
+    "RUF003",
+]

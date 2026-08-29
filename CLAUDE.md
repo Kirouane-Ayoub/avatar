@@ -307,4 +307,10 @@ Quirks:
 
 ## Code Style
 
-Pre-commit hooks enforce: `black` formatter (Python 3.11 target), YAML validation, trailing whitespace removal, EOF newlines. The React/TS app uses standard 2-space indent and the existing component conventions (functional components, hooks for state/effects, type-only imports where possible).
+Pre-commit hooks enforce: `ruff-format` + `ruff check --fix` (Python 3.11 target), YAML validation, trailing whitespace removal, EOF newlines. The React/TS app uses standard 2-space indent and the existing component conventions (functional components, hooks for state/effects, type-only imports where possible).
+
+Ruff config lives in `pyproject.toml` under `[tool.ruff]`. Notes:
+- **ruff replaced black** — running both ping-pongs, because they wrap some conditional expressions differently. Don't re-add black.
+- `patches/` is excluded: `patches/speaches_stt.py` is a vendored upstream speaches router bind-mounted into that container, targets its Python 3.12, and must stay diffable against upstream.
+- `E501` is off (the formatter owns line length; it only fires on unsplittable URLs / prompt strings), `SIM117` is off (nested `with pool.connection()` / `with conn.cursor()` is the idiomatic psycopg shape), and `RUF001`-`RUF003` are off (em dashes and box-drawing characters in comments are deliberate).
+- Fire-and-forget coroutines in `agent.py` go through the local `_spawn()` helper, which parks a strong reference in a set until the task completes. A bare `asyncio.ensure_future(...)` is only weakly referenced by the loop and can be garbage-collected mid-flight (`RUF006`).

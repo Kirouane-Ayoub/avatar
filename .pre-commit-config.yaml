@@ -5,8 +5,12 @@ repos:
     -   id: check-yaml
     -   id: end-of-file-fixer
     -   id: trailing-whitespace
--   repo: https://github.com/psf/black
-    rev: 25.12.0
+# ruff replaces black here: it does both the formatting and the linting,
+# and running both would ping-pong (they disagree on how to wrap a few
+# conditional expressions). Rules + excludes live in pyproject.toml.
+-   repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.5
     hooks:
-    -   id: black
-        language_version: python3.11
+    -   id: ruff-check
+        args: [--fix]
+    -   id: ruff-format
