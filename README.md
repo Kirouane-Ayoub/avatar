@@ -4,7 +4,7 @@ A fully local, real-time speech-to-speech voice agent built on LiveKit. The name
 
 > **What's in the box:** auth + multi-user, per-avatar long-term memory (Mem0), short-term cross-session recall (transcripts), 3D animated avatar with lip sync, vision-driven affect (camera mood detection), proactive utterances (avatar breaks silence), function-call tools with live UI feedback, password-reconfirmed account delete, persona prompt-injection defense, and per-avatar Forget Memory.
 
-**Stack:** Qwen 3.5-9B (MLX, runs on Metal) for chat · Kokoro / Orpheus for TTS · Faster-Whisper for STT · Mem0 + pgvector for memory · LiveKit for WebRTC signaling · React + TalkingHead.js for the avatar UI.
+**Stack:** Qwen 3.5-9B (MLX, runs on Metal) for chat · Kokoro / Orpheus / Supertonic for TTS · Faster-Whisper for STT · Mem0 + pgvector for memory · LiveKit for WebRTC signaling · React + TalkingHead.js for the avatar UI.
 
 ---
 
@@ -251,42 +251,6 @@ python benchmark.py --rounds 5  # latency benchmark
 
 ---
 
-## Project structure
-
-```
-avatar/
-├── src/                       Backend (Python — agent + token server)
-│   ├── agent.py              LiveKit job entrypoint (~700 lines, thin glue)
-│   ├── config.py             Config dataclass — single source of truth for env vars
-│   ├── cues.py               Shared mood/gesture/pose vocabulary (LLM + UI)
-│   ├── tools.py              @function_tool catalogue + UI event sink
-│   ├── proactive.py          ProactiveSpeaker — opt-in silence/mood-driven nudges
-│   ├── auth/                 signup/login/JWT, DB pool + CRUD, SessionIdentity
-│   ├── llm/                  PatientLLM client + system prompt assembly
-│   ├── tts/                  Kokoro + Orpheus engines, voice catalog
-│   ├── vision/               Ambient affect VLM watcher
-│   └── memory/               Mem0 SDK wrapper + Protocol seam
-│
-├── ui/                        Frontend (React + TypeScript + Vite)
-│   ├── server.py             Token server + REST API (runs alongside agent)
-│   ├── index.html            Importmap shell (TalkingHead + lipsync from CDN)
-│   └── src/
-│       ├── App.tsx           Top-level routing (login → picker → editor → session)
-│       ├── components/       Login, AvatarPicker, AvatarEditor, SessionView
-│       ├── hooks/            useAuth, useSession, useTalkingHead, useLipsyncDriver
-│       └── api.ts            Typed REST client
-│
-├── config/                    LiveKit server config
-├── docker-compose.yml         Six-service stack (livekit, agent, kokoro, speaches, postgres, model-loader)
-├── Dockerfile                 Multi-stage (node ui-builder → python runtime)
-├── .env.example               Documented config (copy to .env)
-├── run.sh                     One-command bring-up (host MLX + Docker)
-├── benchmark.py               End-to-end latency benchmark
-└── CLAUDE.md                  Architecture deep dive — read this for the full picture
-```
-
----
-
 ## Environment variables
 
 The minimum set you need to set in `.env`:
@@ -305,6 +269,7 @@ Common optional:
 | Variable | What it does |
 |---|---|
 | `ORPHEUS_BASE_URL` / `ORPHEUS_MODEL` | Enable Orpheus TTS as a second voice backend. |
+| `SUPERTONIC_BASE_URL` / `SUPERTONIC_MODEL` | Enable Supertonic TTS (44.1 kHz, multilingual styles) as a third voice backend. |
 | `VLM_BASE_URL` / `VLM_MODEL` | Ambient-affect watcher (Qwen3-VL-2B). When unset, no camera mood detection. |
 | `MEM0_PG_HOST` + `MEM0_PG_*` | Long-term memory. When `MEM0_PG_HOST` unset, falls back to NullProvider (no memory). |
 | `MEM0_LLM_*` / `MEM0_EMBEDDER_*` | Override Mem0's extraction LLM and embedder. |
