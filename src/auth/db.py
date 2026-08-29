@@ -31,7 +31,6 @@ import logging
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional
 
 from psycopg.rows import dict_row
 from psycopg.types.json import Json
@@ -228,9 +227,9 @@ class Avatar:
     id: str
     user_id: str
     name: str
-    persona: Optional[str]
-    voice: Optional[str]
-    avatar_key: Optional[str]
+    persona: str | None
+    voice: str | None
+    avatar_key: str | None
     tools: list  # decoded from tools_json
     # Whether this avatar should proactively break silence (per-avatar
     # opt-in). Drives src/proactive.py at session start. Off by default
@@ -261,12 +260,18 @@ class Db:
         # `import db` from blocking on a missing postgres at import
         # time (tests, dev without docker).
         self._pool = ConnectionPool(
-            conninfo=conninfo, min_size=1, max_size=10, open=False, kwargs={"row_factory": dict_row}
+            conninfo=conninfo,
+            min_size=1,
+            max_size=10,
+            open=False,
+            kwargs={"row_factory": dict_row},
         )
         self._opened = False
         logger.info(
             "Db initialized (pool not yet opened): %s:%d/%s",
-            config.app_pg_host, config.app_pg_port, config.app_pg_dbname,
+            config.app_pg_host,
+            config.app_pg_port,
+            config.app_pg_dbname,
         )
 
     def init(self) -> None:
@@ -286,7 +291,7 @@ class Db:
             self._opened = False
 
     # ── CRUD ────────────────────────────────────────────────────────────
-    def get_user_by_id(self, user_id: str) -> Optional[User]:
+    def get_user_by_id(self, user_id: str) -> User | None:
         with self._pool.connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -296,7 +301,7 @@ class Db:
                 row = cur.fetchone()
                 return _row_to_user(row) if row else None
 
-    def get_user_by_username(self, username: str) -> Optional[User]:
+    def get_user_by_username(self, username: str) -> User | None:
         with self._pool.connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -344,7 +349,7 @@ class Db:
                 # rowcount is the number of rows the last SQL touched.
                 return cur.rowcount > 0
 
-    def update_display_name(self, user_id: str, display_name: str) -> Optional[User]:
+    def update_display_name(self, user_id: str, display_name: str) -> User | None:
         """The only mutable field on `users` post-refactor. Wizard /
         profile-edit calls this when the user changes their display
         name; everything else (persona, voice, etc.) lives on avatars."""
@@ -371,7 +376,7 @@ class Db:
                 )
                 return [_row_to_avatar(row) for row in cur.fetchall()]
 
-    def get_avatar(self, avatar_id: str) -> Optional[Avatar]:
+    def get_avatar(self, avatar_id: str) -> Avatar | None:
         with self._pool.connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -386,10 +391,10 @@ class Db:
         *,
         user_id: str,
         name: str,
-        persona: Optional[str] = None,
-        voice: Optional[str] = None,
-        avatar_key: Optional[str] = None,
-        tools: Optional[list] = None,
+        persona: str | None = None,
+        voice: str | None = None,
+        avatar_key: str | None = None,
+        tools: list | None = None,
         proactive: bool = False,
         vision_watcher: bool = True,
     ) -> Avatar:
@@ -407,7 +412,11 @@ class Db:
                     RETURNING {_AVATAR_COLS}
                     """,
                     (
-                        user_id, name, persona, voice, avatar_key,
+                        user_id,
+                        name,
+                        persona,
+                        voice,
+                        avatar_key,
                         # Json() wraps the list so psycopg sends it to the
                         # JSONB column with the right type adapter (without
                         # this, psycopg would try str-cast and Postgres would
@@ -424,15 +433,15 @@ class Db:
         self,
         avatar_id: str,
         *,
-        name: Optional[str] = None,
-        persona: Optional[str] = None,
-        voice: Optional[str] = None,
-        avatar_key: Optional[str] = None,
-        tools: Optional[list] = None,
-        proactive: Optional[bool] = None,
-        vision_watcher: Optional[bool] = None,
+        name: str | None = None,
+        persona: str | None = None,
+        voice: str | None = None,
+        avatar_key: str | None = None,
+        tools: list | None = None,
+        proactive: bool | None = None,
+        vision_watcher: bool | None = None,
         touch_last_used: bool = False,
-    ) -> Optional[Avatar]:
+    ) -> Avatar | None:
         """Patch update — only fields passed as kwargs are written. Set
         `touch_last_used=True` to also bump last_used_at (called by
         /api/token on every session start)."""
@@ -502,9 +511,7 @@ class Db:
                 )
                 return cur.rowcount
 
-    def record_transcript(
-        self, avatar_id: str, role: str, text: str
-    ) -> None:
+    def record_transcript(self, avatar_id: str, role: str, text: str) -> None:
         """Append one verbatim turn to the transcripts table. Called for
         BOTH user and assistant turns. Cheap insert; no LLM in the
         path. The row's id auto-increments via BIGSERIAL.
@@ -544,9 +551,7 @@ class Db:
                     (avatar_id, avatar_id, TRANSCRIPT_RETENTION - 1),
                 )
 
-    def recent_transcripts(
-        self, avatar_id: str, limit: int = 20
-    ) -> list[Transcript]:
+    def recent_transcripts(self, avatar_id: str, limit: int = 20) -> list[Transcript]:
         """Return the most recent N turns for this avatar in
         CHRONOLOGICAL order (oldest first), so the system prompt can
         present them as a normal dialogue. Internally we ORDER BY DESC
@@ -627,7 +632,7 @@ def _row_to_avatar(row: dict) -> Avatar:
 
 # Module-level singleton so the agent and token server (running in the
 # same Python process) share one pool. Set up via init_db(config).
-_db: Optional[Db] = None
+_db: Db | None = None
 
 
 def init_db(config: Config) -> Db:

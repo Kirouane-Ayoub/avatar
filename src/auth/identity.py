@@ -28,7 +28,6 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Optional
 
 from .db import Db
 
@@ -58,8 +57,8 @@ class SessionIdentity:
     name: str
     persona: str
     body: str  # "F" or "M"
-    voice: Optional[str]
-    language: Optional[str]
+    voice: str | None
+    language: str | None
     requested_tool_ids: list = field(default_factory=list)
     # Per-avatar opt-in: when True, the agent runs ProactiveSpeaker so
     # the avatar will break silence and check in on the user. When False
@@ -76,7 +75,7 @@ class SessionIdentity:
         participant,
         db: Db,
         default_persona: str = "You are a warm, friendly companion. Chat like a close friend.",
-    ) -> "SessionIdentity":
+    ) -> SessionIdentity:
         """Build a SessionIdentity from a LiveKit RemoteParticipant.
 
         participant.identity is the avatar_id (the token server set it
@@ -118,7 +117,9 @@ class SessionIdentity:
         )
         body = cfg.get("body") if cfg.get("body") in {"F", "M"} else "F"
         voice = avatar.voice or cfg.get("voice") or None
-        cfg_language = cfg.get("language") if cfg.get("language") in {"en", "ja"} else None
+        cfg_language = (
+            cfg.get("language") if cfg.get("language") in {"en", "ja"} else None
+        )
         # Tools: avatar wins if it has any saved, else wizard.
         tool_ids = avatar.tools if avatar.tools else (cfg.get("tools") or [])
         if not isinstance(tool_ids, list):
@@ -143,7 +144,7 @@ class SessionIdentity:
 UserIdentity = SessionIdentity
 
 
-def _parse_metadata(raw: Optional[str]) -> dict:
+def _parse_metadata(raw: str | None) -> dict:
     """Parse the wizard config from participant.metadata. Tolerates
     missing/bad JSON — returns {} so the defaults can apply."""
     if not raw:

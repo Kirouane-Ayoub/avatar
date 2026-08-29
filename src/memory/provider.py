@@ -34,7 +34,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from typing import Optional, Protocol
+from typing import Protocol
 
 from config import Config
 
@@ -62,9 +62,7 @@ class MemoryProvider(Protocol):
       by delete-avatar (and cascade through delete-account).
     """
 
-    async def record_batch(
-        self, user_id: str, messages: list[dict]
-    ) -> None: ...
+    async def record_batch(self, user_id: str, messages: list[dict]) -> None: ...
 
     async def record_turn(self, user_id: str, role: str, text: str) -> None: ...
 
@@ -113,9 +111,9 @@ class Mem0Provider:
         llm_model: str,
         embedder_provider: str = "huggingface",
         embedder_model: str = "BAAI/bge-small-en-v1.5",
-        embedder_base_url: Optional[str] = None,
-        embedder_api_key: Optional[str] = None,
-        embedder_dims: Optional[int] = None,
+        embedder_base_url: str | None = None,
+        embedder_api_key: str | None = None,
+        embedder_dims: int | None = None,
     ) -> None:
         # Imported lazily so `import memory` works even when mem0ai isn't
         # installed (e.g. early dev / CI), and so the heavy import cost
@@ -218,12 +216,16 @@ class Mem0Provider:
         if os.getenv("LOG_USER_TEXT") == "1":
             logger.info(
                 "memory.batch: user=%s messages=%d (first=%r)",
-                user_id, len(cleaned), cleaned[0]["content"][:80],
+                user_id,
+                len(cleaned),
+                cleaned[0]["content"][:80],
             )
         else:
             logger.info(
                 "memory.batch: user=%s messages=%d (first_len=%d)",
-                user_id, len(cleaned), len(cleaned[0]["content"]),
+                user_id,
+                len(cleaned),
+                len(cleaned[0]["content"]),
             )
         try:
             result = await asyncio.to_thread(
@@ -263,7 +265,9 @@ class Mem0Provider:
                         events[evt] = events.get(evt, 0) + 1
                     logger.info(
                         "memory.batch -> %d facts user=%s by_event=%s",
-                        len(items), user_id, events,
+                        len(items),
+                        user_id,
+                        events,
                     )
         except Exception:
             logger.info("memory.batch -> raw=%s user=%s", str(result)[:200], user_id)

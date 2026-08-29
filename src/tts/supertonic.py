@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
-from typing import Optional
 
 import aiohttp
 from livekit.agents import tts, utils
@@ -71,7 +70,7 @@ class SupertonicConfig:
     speed: float = 1.0
     # Language code the server should synthesize in ("na" lets Supertonic
     # auto-fallback). None omits the field entirely.
-    lang: Optional[str] = None
+    lang: str | None = None
 
 
 class SupertonicTTS(tts.TTS):
@@ -83,7 +82,7 @@ class SupertonicTTS(tts.TTS):
         )
         self._config = config
 
-    def synthesize(self, text: str, **kwargs) -> "SupertonicChunkedStream":
+    def synthesize(self, text: str, **kwargs) -> SupertonicChunkedStream:
         return SupertonicChunkedStream(self, text, **kwargs)
 
 

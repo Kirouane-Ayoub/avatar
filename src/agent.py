@@ -22,7 +22,7 @@ import logging
 import os
 import re
 import time
-from typing import AsyncIterable
+from collections.abc import AsyncIterable
 
 from dotenv import load_dotenv
 
@@ -65,9 +65,9 @@ from livekit.agents import (  # noqa: E402
 )
 from livekit.agents.llm import ImageContent  # noqa: E402
 from livekit.agents.utils.images import (  # noqa: E402
-    encode,
     EncodeOptions,
     ResizeOptions,
+    encode,
 )
 from livekit.plugins import openai, silero  # noqa: E402
 
@@ -81,7 +81,8 @@ from proactive import (  # noqa: E402
     ProactiveSpeaker,
     is_synthetic_user_message,
 )
-from tools import TOOL_CATALOG, set_event_sink as set_tool_event_sink  # noqa: E402
+from tools import TOOL_CATALOG  # noqa: E402
+from tools import set_event_sink as set_tool_event_sink  # noqa: E402
 from tts import (  # noqa: E402
     KokoroConfig,
     KokoroTTS,
@@ -90,9 +91,9 @@ from tts import (  # noqa: E402
     SupertonicConfig,
     SupertonicTTS,
     backend_for,
-    supertonic_style_for,
     is_known_voice,
     stt_language_for,
+    supertonic_style_for,
 )
 from vision import VisionWatcher, VisionWatcherConfig  # noqa: E402
 
@@ -125,6 +126,7 @@ def _redact(text: str) -> str:
     head = text[:_PREVIEW_CHARS]
     suffix = "…" if len(text) > _PREVIEW_CHARS else ""
     return f"{head!r}{suffix} (len={len(text)})"
+
 
 # Canonical cue vocabularies, indexed by tag kind. The LLM occasionally
 # ad-libs values outside this set (we observed `mood:playful`) which the
@@ -333,9 +335,7 @@ async def entrypoint(ctx):
     # that exist in the catalog. tool_ids mirrors the resolved set so the
     # system prompt can mention exactly the tools that are actually wired
     # (otherwise the LLM hallucinates calls to tools it doesn't have).
-    tool_ids = [
-        t for t in identity.requested_tool_ids if t in TOOL_CATALOG
-    ]
+    tool_ids = [t for t in identity.requested_tool_ids if t in TOOL_CATALOG]
     tools = [TOOL_CATALOG[t]["tool"] for t in tool_ids]
 
     # Persistent memory: NullProvider when memory is disabled in config.
@@ -361,12 +361,11 @@ async def entrypoint(ctx):
         # call it skipped, a wrong answer, a stale persona). 6 turns is
         # enough for "we were just talking about X" without giving the
         # model 10 example responses to imitate verbatim.
-        recent_turns = await asyncio.to_thread(
-            db.recent_transcripts, identity.id, 6
-        )
+        recent_turns = await asyncio.to_thread(db.recent_transcripts, identity.id, 6)
         logger.info(
             "recalled %d recent turns for avatar=%s",
-            len(recent_turns), identity.id,
+            len(recent_turns),
+            identity.id,
         )
     except Exception:
         logger.exception(
@@ -386,9 +385,22 @@ async def entrypoint(ctx):
         type(memory).__name__,
     )
 
+    # ── Fire-and-forget task tracking ───────────────────────────────────
+    # asyncio only holds a WEAK reference to a running task, so a bare
+    # ensure_future() can be garbage-collected mid-flight and silently
+    # cancel itself. Everything spawned fire-and-forget goes through
+    # _spawn so a strong reference survives until the task completes.
+    background_tasks: set[asyncio.Task] = set()
+
+    def _spawn(coro) -> asyncio.Task:
+        task = asyncio.ensure_future(coro)
+        background_tasks.add(task)
+        task.add_done_callback(background_tasks.discard)
+        return task
+
     # ── DataChannel publishing helpers ──────────────────────────────────
     def _publish(data):
-        asyncio.ensure_future(
+        _spawn(
             ctx.room.local_participant.publish_data(
                 payload=json.dumps(data),
                 reliable=True,
@@ -582,7 +594,7 @@ async def entrypoint(ctx):
         # just chose to type instead of speak.
         if proactive_speaker is not None:
             proactive_speaker.note_user_turn()
-        asyncio.ensure_future(session.generate_reply(user_input=text))
+        _spawn(session.generate_reply(user_input=text))
 
     @ctx.room.on("track_published")
     def on_track_published(publication, p):
@@ -603,7 +615,8 @@ async def entrypoint(ctx):
             if pub.kind == rtc.TrackKind.KIND_VIDEO and not pub.subscribed:
                 logger.info(
                     "Catching pre-existing video track from %s (sid=%s)",
-                    remote.identity, pub.sid,
+                    remote.identity,
+                    pub.sid,
                 )
                 pub.set_subscribed(True)
 
@@ -611,7 +624,7 @@ async def entrypoint(ctx):
     def on_track_subscribed(track, publication, p):
         if track.kind == rtc.TrackKind.KIND_VIDEO:
             logger.info("Video track subscribed from %s", p.identity)
-            asyncio.ensure_future(_process_video(track))
+            _spawn(_process_video(track))
 
     async def _process_video(track):
         """Continuously capture frames from the user's video track."""
@@ -673,10 +686,11 @@ async def entrypoint(ctx):
                     except Exception:
                         logger.exception(
                             "record_transcript failed avatar=%s role=%s",
-                            identity.id, role,
+                            identity.id,
+                            role,
                         )
 
-                asyncio.ensure_future(_persist())
+                _spawn(_persist())
 
         # Long-term memory: USER messages only (assistant turns rarely
         # carry new facts about the user). Buffer per-session and flush
@@ -685,7 +699,7 @@ async def entrypoint(ctx):
         if msg.role == "user" and text:
             user_turn_buffer.append({"role": "user", "content": text})
             if len(user_turn_buffer) >= USER_TURN_BATCH_SIZE:
-                asyncio.ensure_future(_flush_memory_batch("batch full"))
+                _spawn(_flush_memory_batch("batch full"))
 
         # Reset ProactiveSpeaker's silence clock on every REAL user turn
         # (synthetic prompts already returned above). Without this, the
@@ -752,7 +766,11 @@ async def entrypoint(ctx):
     watcher = None
     if config.vlm_base_url and identity.vision_watcher:
         watcher = await _start_vision_watcher(
-            config, session, agent, _publish_cue, ctx,
+            config,
+            session,
+            agent,
+            _publish_cue,
+            ctx,
         )
     elif config.vlm_base_url:
         logger.info(
@@ -770,14 +788,13 @@ async def entrypoint(ctx):
             str(getattr(session, "agent_state", "listening")),
         )
         get_last_mood = (
-            watcher.get_last_mood if watcher is not None
-            else (lambda: (None, 0.0))
+            watcher.get_last_mood if watcher is not None else (lambda: (None, 0.0))
         )
 
         def _fire_nudge(prompt: str) -> None:
             # Fire-and-forget so the proactive loop never awaits the LLM
             # call (which would block the next tick / shutdown).
-            asyncio.ensure_future(session.generate_reply(user_input=prompt))
+            _spawn(session.generate_reply(user_input=prompt))
 
         proactive_speaker = ProactiveSpeaker(
             config=ProactiveConfig(),
@@ -810,7 +827,9 @@ async def entrypoint(ctx):
     )
 
 
-async def _start_vision_watcher(config, session, agent, publish_cue, ctx) -> VisionWatcher:
+async def _start_vision_watcher(
+    config, session, agent, publish_cue, ctx
+) -> VisionWatcher:
     """Spin up the ambient affect watcher and register its shutdown.
 
     Lifted out of entrypoint() because the idle-gate state-tracking is

@@ -19,8 +19,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 
 import bcrypt
 import jwt
@@ -86,7 +85,9 @@ def _validate_password(password: str) -> None:
 def _hash_password(password: str) -> str:
     """bcrypt with 12 rounds. Returns the hash as a UTF-8 string for
     storing in TEXT columns."""
-    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("utf-8")
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode(
+        "utf-8"
+    )
 
 
 def _verify_password(password: str, password_hash: str) -> bool:
@@ -111,7 +112,7 @@ def issue_session_token(user: User, config: Config) -> str:
       - iat:      issued-at (for audit / future revocation)
       - exp:      expires-at (enforced on every verify)
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     payload = {
         "sub": user.id,
         "username": user.username,
@@ -134,9 +135,9 @@ def decode_session_token(token: str, config: Config) -> dict:
     try:
         return jwt.decode(token, config.jwt_secret, algorithms=[_JWT_ALG])
     except jwt.ExpiredSignatureError:
-        raise InvalidToken("token expired")
+        raise InvalidToken("token expired") from None
     except jwt.InvalidTokenError as e:
-        raise InvalidToken(f"invalid token: {e}")
+        raise InvalidToken(f"invalid token: {e}") from None
 
 
 def user_id_from_token(token: str, config: Config) -> str:
@@ -156,7 +157,7 @@ def signup(
     *,
     username: str,
     password: str,
-    display_name: Optional[str] = None,
+    display_name: str | None = None,
 ) -> tuple[User, str]:
     """Create a user + return (user, session_jwt) so the client is
     logged in immediately after signup.
@@ -178,7 +179,7 @@ def signup(
             display_name=display_name,
         )
     except psycopg.errors.UniqueViolation:
-        raise UsernameTaken(f"username {username!r} is already taken")
+        raise UsernameTaken(f"username {username!r} is already taken") from None
     token = issue_session_token(user, config)
     logger.info("signup: created user_id=%s username=%s", user.id, user.username)
     return user, token
@@ -219,7 +220,7 @@ def _fetch_password_hash(db: Db, user_id: str) -> str:
     """Pull the password_hash column for a user. Kept inline here
     rather than on the Db class because no other code path needs it
     — the hash should NEVER leave the auth module."""
-    with db._pool.connection() as conn:  # noqa: SLF001 — intentional
+    with db._pool.connection() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT password_hash FROM users WHERE id = %s", (user_id,))
             row = cur.fetchone()

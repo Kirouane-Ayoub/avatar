@@ -39,12 +39,13 @@ must NOT crash the voice loop.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import random
 import time
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Optional
 
 logger = logging.getLogger("proactive")
 
@@ -232,31 +233,31 @@ class ProactiveSpeaker:
         *,
         config: ProactiveConfig,
         get_states: Callable[[], tuple[str, str]],
-        get_last_mood: Callable[[], tuple[Optional[str], float]],
+        get_last_mood: Callable[[], tuple[str | None, float]],
         has_camera_frame: Callable[[], bool],
         fire: Callable[[str], None],
     ) -> None:
         """Args:
-            get_states: returns (user_state, agent_state) snapshot. Both
-                are short strings ("listening", "speaking", "thinking",
-                "away", "initializing"). Read directly from AgentSession.
-            get_last_mood: returns (mood, monotonic-ts-of-onset) from
-                VisionWatcher. (None, 0.0) when no mood yet.
-            has_camera_frame: returns True when there's a recent camera
-                frame the LLM can use as visual context. Drives the
-                choice between camera-grounded vs generic silence
-                prompts, and the camera-grounding prefix on every nudge.
-            fire: callback that triggers the actual LLM-driven reply.
-                agent.py wraps `session.generate_reply(user_input=...)`
-                in this so the prompt is wrapped in SYS_NUDGE markers
-                AND the call is fire-and-forget (asyncio.ensure_future).
+        get_states: returns (user_state, agent_state) snapshot. Both
+            are short strings ("listening", "speaking", "thinking",
+            "away", "initializing"). Read directly from AgentSession.
+        get_last_mood: returns (mood, monotonic-ts-of-onset) from
+            VisionWatcher. (None, 0.0) when no mood yet.
+        has_camera_frame: returns True when there's a recent camera
+            frame the LLM can use as visual context. Drives the
+            choice between camera-grounded vs generic silence
+            prompts, and the camera-grounding prefix on every nudge.
+        fire: callback that triggers the actual LLM-driven reply.
+            agent.py wraps `session.generate_reply(user_input=...)`
+            in this so the prompt is wrapped in SYS_NUDGE markers
+            AND the call is fire-and-forget (asyncio.ensure_future).
         """
         self._config = config
         self._get_states = get_states
         self._get_last_mood = get_last_mood
         self._has_camera_frame = has_camera_frame
         self._fire = fire
-        self._task: Optional[asyncio.Task] = None
+        self._task: asyncio.Task | None = None
         self._stopped = asyncio.Event()
         # Counters / timers. monotonic so they're immune to wall-clock
         # adjustments mid-session.
@@ -297,10 +298,12 @@ class ProactiveSpeaker:
         if self._task is not None:
             try:
                 await asyncio.wait_for(self._task, timeout=2.0)
-            except (asyncio.TimeoutError, asyncio.CancelledError):
+            except (TimeoutError, asyncio.CancelledError):
                 self._task.cancel()
             self._task = None
-        logger.info("ProactiveSpeaker stopped (fired %d check-ins)", self._fires_this_session)
+        logger.info(
+            "ProactiveSpeaker stopped (fired %d check-ins)", self._fires_this_session
+        )
 
     async def _loop(self) -> None:
         """Tick loop. Sleep on the stop event so shutdown is responsive
@@ -311,12 +314,12 @@ class ProactiveSpeaker:
                 self._tick()
             except Exception:
                 logger.exception("proactive tick failed")
-            try:
+            # Timeout is the normal path — it just means the poll
+            # interval elapsed without a stop() being requested.
+            with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(
                     self._stopped.wait(), timeout=self._config.poll_interval_s
                 )
-            except asyncio.TimeoutError:
-                pass
 
     def _tick(self) -> None:
         """One iteration of the discipline + trigger checks. Cheap;

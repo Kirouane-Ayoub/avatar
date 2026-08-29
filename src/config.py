@@ -22,8 +22,6 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import Optional
-
 
 # Voice defaults per (language, body) pair. Kept as a top-level constant
 # rather than a Config field so the dict shape (tuple keys) stays
@@ -67,28 +65,28 @@ class Config:
     # ── Orpheus TTS (optional second backend) ───────────────────────────
     # When unset, Orpheus voices selected in the wizard will fail loudly
     # at session start — Kokoro voices are unaffected.
-    orpheus_base_url: Optional[str] = None
+    orpheus_base_url: str | None = None
     orpheus_model: str = "orpheus"
 
     # ── Supertonic TTS (optional third backend) ─────────────────────────
     # When unset, Supertonic voices selected in the wizard fail loudly at
     # session start — Kokoro/Orpheus voices are unaffected. 44.1kHz WAV,
     # no word timestamps (jaw-only lipsync). Voice = style (F1-F5/M1-M5).
-    supertonic_base_url: Optional[str] = None
+    supertonic_base_url: str | None = None
     supertonic_model: str = "supertonic-3"
     supertonic_speed: float = 1.0
 
     # ── Ambient affect VLM (optional) ───────────────────────────────────
     # When unset, VisionWatcher uses NullProvider equivalent — no ambient
     # mood detection, the LLM's speech-time cues remain the only source.
-    vlm_base_url: Optional[str] = None
+    vlm_base_url: str | None = None
     vlm_model: str = "mlx-community/Qwen3-VL-2B-Instruct-4bit"
 
     # ── Persistent memory (Mem0 + Postgres + Ollama embedder) ───────────
     # When mem0_pg_host is unset, NullProvider is used (no per-user
     # memory). All other mem0_* fields are still populated with sensible
     # defaults so partial config doesn't crash.
-    mem0_pg_host: Optional[str] = None
+    mem0_pg_host: str | None = None
     mem0_pg_port: int = 5432
     mem0_pg_user: str = "mem0"
     mem0_pg_password: str = "mem0"
@@ -104,9 +102,9 @@ class Config:
     # Mem0's embedding model. Default = Ollama on the host.
     mem0_embedder_provider: str = "openai"
     mem0_embedder: str = "all-minilm"
-    mem0_embedder_base_url: Optional[str] = None
-    mem0_embedder_api_key: Optional[str] = None
-    mem0_embedder_dims: Optional[int] = None
+    mem0_embedder_base_url: str | None = None
+    mem0_embedder_api_key: str | None = None
+    mem0_embedder_dims: int | None = None
 
     # ── Auth / sessions ─────────────────────────────────────────────────
     # JWT_SECRET signs the session token issued at /api/login. Must be set
@@ -135,7 +133,7 @@ class Config:
 
     # ────────────────────────────────────────────────────────────────────
     @classmethod
-    def from_env(cls) -> "Config":
+    def from_env(cls) -> Config:
         """Read env vars once at startup. Required vars raise KeyError
         with a clear message; optional vars use typed defaults."""
 

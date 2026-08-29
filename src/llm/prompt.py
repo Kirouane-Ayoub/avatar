@@ -15,11 +15,9 @@ and is imported here.
 
 from __future__ import annotations
 
+from auth import UserIdentity
 from cues import GESTURES, MOODS, POSES
 from tools import TOOL_CATALOG
-
-from auth import UserIdentity
-
 
 # When-to-use hints for every mood and gesture. These live here, not in
 # cues.py, because they're prompt-engineering artifacts — cues.py owns the
@@ -194,7 +192,7 @@ def _scrub_user_text(text: str) -> str:
         # Case-insensitive replace without regex — these are fixed strings.
         idx = out.lower().find(token.lower())
         while idx != -1:
-            out = out[:idx] + " " + out[idx + len(token):]
+            out = out[:idx] + " " + out[idx + len(token) :]
             idx = out.lower().find(token.lower())
     return out
 
@@ -298,8 +296,8 @@ def _tools_block(tool_ids: list[str]) -> str:
         "\n\nTOOLS YOU HAVE:\n"
         + "\n".join(parts)
         + "\nWhen the user's request matches one of these, do BOTH in the "
-        "same reply: (1) say a short, casual verbal hold (\"hold on, let me "
-        "check\", \"one sec, looking that up\", \"give me a moment\") so "
+        'same reply: (1) say a short, casual verbal hold ("hold on, let me '
+        'check", "one sec, looking that up", "give me a moment") so '
         "your friend hears that you heard them, then (2) emit the function "
         "call right after. Both in one turn — the tool runs immediately, "
         "you'll have the answer in seconds, and your next reply can react "

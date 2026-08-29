@@ -37,7 +37,7 @@ class KokoroTTS(tts.TTS):
         )
         self._config = config
 
-    def synthesize(self, text: str, **kwargs) -> "KokoroChunkedStream":
+    def synthesize(self, text: str, **kwargs) -> KokoroChunkedStream:
         return KokoroChunkedStream(self, text, **kwargs)
 
 
