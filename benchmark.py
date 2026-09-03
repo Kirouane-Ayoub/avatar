@@ -2,6 +2,7 @@ import argparse
 import io
 import json
 import math
+import os
 import struct
 import time
 
@@ -283,11 +284,18 @@ def main():
     parser.add_argument("--livekit-url", default="http://localhost:7880")
     parser.add_argument("--stt-url", default="http://localhost:8000/v1")
     parser.add_argument("--tts-url", default="http://localhost:8880")
+    # The LLM runs host-side (MLX), so the defaults mirror the .env variable
+    # names and fall back to the local mlx_vlm.server address. Never hardcode
+    # a real endpoint or key here — this file ships in the public repo.
     parser.add_argument(
-        "--llm-url", default="http://localhost:8090/v1"
+        "--llm-url",
+        default=os.getenv("LLM_BASE_URL", "http://localhost:8090/v1"),
     )
-    parser.add_argument("--llm-api-key", default="REDACTED_LLM_API_KEY")
-    parser.add_argument("--llm-model", default="qwen3.5-397b")
+    parser.add_argument("--llm-api-key", default=os.getenv("LLM_API_KEY", "none"))
+    parser.add_argument(
+        "--llm-model",
+        default=os.getenv("LLM_MODEL", "mlx-community/Qwen3.5-9B-MLX-4bit"),
+    )
     parser.add_argument("--stt-model", default="Systran/faster-whisper-tiny.en")
     parser.add_argument("--tts-model", default="kokoro")
     parser.add_argument("--tts-voice", default="af_heart")
