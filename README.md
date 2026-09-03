@@ -6,6 +6,23 @@ A fully local, real-time speech-to-speech voice agent built on LiveKit. The defa
 
 **Stack:** Qwen 3.5-9B (MLX, runs on Metal) for chat · Kokoro / Orpheus / Supertonic for TTS · Faster-Whisper for STT · Mem0 + pgvector for memory · LiveKit for WebRTC signaling · React + TalkingHead.js for the avatar UI.
 
+## Screenshots
+
+The avatar editor — pick a body, write a persona, choose a voice, toggle abilities. Changes auto-save as you type.
+
+![Avatar editor — full-body preview, persona, voice picker, abilities](docs/screenshots/editor.png)
+
+| Head framing + mood preview (VRoid anime avatar) | Dark theme |
+|---|---|
+| ![Head close-up with a mood selected](docs/screenshots/editor-head-mood.png) | ![Editor in dark mode](docs/screenshots/editor-dark.png) |
+
+<details>
+<summary>Sign-in screen</summary>
+
+![Sign-in screen](docs/screenshots/login.png)
+
+</details>
+
 ---
 
 ## System Overview
