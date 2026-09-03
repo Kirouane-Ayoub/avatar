@@ -1,6 +1,6 @@
 # Avatar — Real-time Voice Companion
 
-A fully local, real-time speech-to-speech voice agent built on LiveKit. The name nods to the Hollywood craft of Avatar: dubbing voice and sound onto a face that's already moving — which is literally what the lipsync + TTS pipeline does. The default persona ships as **Liva** but is fully configurable per session — name, persona, voice, avatar, tools.
+A fully local, real-time speech-to-speech voice agent built on LiveKit. The default persona ships as **Liva** but is fully configurable per session — name, persona, voice, avatar, tools.
 
 > **What's in the box:** auth + multi-user, per-avatar long-term memory (Mem0), short-term cross-session recall (transcripts), 3D animated avatar with lip sync, vision-driven affect (camera mood detection), proactive utterances (avatar breaks silence), function-call tools with live UI feedback, password-reconfirmed account delete, persona prompt-injection defense, and per-avatar Forget Memory.
 
