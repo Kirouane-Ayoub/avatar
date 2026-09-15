@@ -2,11 +2,11 @@ import argparse
 import io
 import json
 import math
+import os
 import struct
 import time
 
 import requests
-
 import websocket  # pip install websocket-client
 
 TEST_PROMPTS = [
@@ -53,10 +53,10 @@ def benchmark_livekit(cfg, rounds):
             elapsed = (time.perf_counter() - start) * 1000
             times.append(elapsed)
             print(
-                f"   [{i+1}/{rounds}] HTTP  {elapsed:>6.1f}ms  status={resp.status_code}"
+                f"   [{i + 1}/{rounds}] HTTP  {elapsed:>6.1f}ms  status={resp.status_code}"
             )
         except Exception as e:
-            print(f"   [{i+1}/{rounds}] HTTP  ERROR: {e}")
+            print(f"   [{i + 1}/{rounds}] HTTP  ERROR: {e}")
 
     # WebSocket connect/disconnect
     ws_times = []
@@ -70,12 +70,14 @@ def benchmark_livekit(cfg, rounds):
             elapsed = (time.perf_counter() - start) * 1000
             ws.close()
             ws_times.append(elapsed)
-            print(f"   [{i+1}/{rounds}] WS    {elapsed:>6.1f}ms  connected")
+            print(f"   [{i + 1}/{rounds}] WS    {elapsed:>6.1f}ms  connected")
         except Exception as e:
             elapsed = (time.perf_counter() - start) * 1000
             ws_times.append(elapsed)
             # Connection refused or auth error is fine — we're measuring latency
-            print(f"   [{i+1}/{rounds}] WS    {elapsed:>6.1f}ms  ({type(e).__name__})")
+            print(
+                f"   [{i + 1}/{rounds}] WS    {elapsed:>6.1f}ms  ({type(e).__name__})"
+            )
 
     print_stats("http", times)
     print_stats("websocket", ws_times)
@@ -105,9 +107,9 @@ def benchmark_stt(cfg, rounds):
             resp.raise_for_status()
             times.append(elapsed)
             text = resp.json().get("text", "")
-            print(f"   [{i+1}/{rounds}] {elapsed:>7.0f}ms  text={text!r:.40}")
+            print(f"   [{i + 1}/{rounds}] {elapsed:>7.0f}ms  text={text!r:.40}")
         except Exception as e:
-            print(f"   [{i+1}/{rounds}] ERROR: {e}")
+            print(f"   [{i + 1}/{rounds}] ERROR: {e}")
 
     return times
 
@@ -200,11 +202,11 @@ def benchmark_llm(cfg, rounds):
 
             tps = token_count / (total / 1000) if total > 0 and token_count > 0 else 0
             print(
-                f"   [{i+1}/{rounds}] TTFT={ttft:>6.0f}ms  total={total:>6.0f}ms  {token_count} tok  ~{tps:.0f} tok/s  {full_text!r:.60}"
+                f"   [{i + 1}/{rounds}] TTFT={ttft:>6.0f}ms  total={total:>6.0f}ms  {token_count} tok  ~{tps:.0f} tok/s  {full_text!r:.60}"
             )
 
         except Exception as e:
-            print(f"   [{i+1}/{rounds}] ERROR: {e}")
+            print(f"   [{i + 1}/{rounds}] ERROR: {e}")
 
     return ttfts, totals
 
@@ -255,11 +257,11 @@ def benchmark_tts(cfg, rounds):
             totals.append(total)
 
             print(
-                f"   [{i+1}/{rounds}] TTFB={ttfb:>6.0f}ms  total={total:>6.0f}ms  audio={audio_dur:.0f}ms  {total_bytes/1024:.0f}KB"
+                f"   [{i + 1}/{rounds}] TTFB={ttfb:>6.0f}ms  total={total:>6.0f}ms  audio={audio_dur:.0f}ms  {total_bytes / 1024:.0f}KB"
             )
 
         except Exception as e:
-            print(f"   [{i+1}/{rounds}] ERROR: {e}")
+            print(f"   [{i + 1}/{rounds}] ERROR: {e}")
 
     return ttfbs, totals
 
@@ -282,11 +284,18 @@ def main():
     parser.add_argument("--livekit-url", default="http://localhost:7880")
     parser.add_argument("--stt-url", default="http://localhost:8000/v1")
     parser.add_argument("--tts-url", default="http://localhost:8880")
+    # The LLM runs host-side (MLX), so the defaults mirror the .env variable
+    # names and fall back to the local mlx_vlm.server address. Never hardcode
+    # a real endpoint or key here — this file ships in the public repo.
     parser.add_argument(
-        "--llm-url", default="http://localhost:8090/v1"
+        "--llm-url",
+        default=os.getenv("LLM_BASE_URL", "http://localhost:8090/v1"),
     )
-    parser.add_argument("--llm-api-key", default="REDACTED_LLM_API_KEY")
-    parser.add_argument("--llm-model", default="qwen3.5-397b")
+    parser.add_argument("--llm-api-key", default=os.getenv("LLM_API_KEY", "none"))
+    parser.add_argument(
+        "--llm-model",
+        default=os.getenv("LLM_MODEL", "mlx-community/Qwen3.5-9B-MLX-4bit"),
+    )
     parser.add_argument("--stt-model", default="Systran/faster-whisper-tiny.en")
     parser.add_argument("--tts-model", default="kokoro")
     parser.add_argument("--tts-voice", default="af_heart")
@@ -341,7 +350,7 @@ def main():
     def bar(val):
         if total == 0:
             return ""
-        n = int(round(val / total * bar_w))
+        n = round(val / total * bar_w)
         return "#" * n + "." * (bar_w - n)
 
     for name, avg in services:
@@ -353,7 +362,7 @@ def main():
     if total > 0:
         bottleneck = max(services, key=lambda x: x[1])
         print(
-            f"\n   Bottleneck: {bottleneck[0]} ({bottleneck[1]:.0f}ms, {bottleneck[1]/total*100:.0f}% of pipeline)"
+            f"\n   Bottleneck: {bottleneck[0]} ({bottleneck[1]:.0f}ms, {bottleneck[1] / total * 100:.0f}% of pipeline)"
         )
 
 

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-Avatar is a real-time speech-to-speech voice agent stack built with LiveKit. The name is a nod to the Hollywood craft of dubbing voice and sound onto a face that's already moving — which is literally what the lipsync + TTS pipeline does. The default persona ships as **Liva** but is fully configurable per session (name, persona, voice, avatar, tools) via the setup wizard. The system features a 3D animated avatar with lip sync, vision capabilities (camera input), function calling (tools), and latency metrics. The pipeline: User speaks → STT (Faster Whisper) → LLM (default `mlx-community/Qwen3.5-9B-MLX-4bit`, running natively via `mlx_vlm.server` because the same server transparently handles VL models too — set `LLM_MODEL=mlx-community/Qwen3.6-27B-4bit` or any `*-VL-*` model to enable in-conversation image_url content) → TTS (Kokoro for word-timestamped lipsync, Orpheus via `mlx-audio` for higher quality, or Supertonic for 44.1kHz multilingual studio audio) → Avatar lip sync + audio playback.
+Avatar is a real-time speech-to-speech voice agent stack built with LiveKit. The default persona ships as **Liva** but is fully configurable per session (name, persona, voice, avatar, tools) via the setup wizard. The system features a 3D animated avatar with lip sync, vision capabilities (camera input), function calling (tools), and latency metrics. The pipeline: User speaks → STT (Faster Whisper) → LLM (default `mlx-community/Qwen3.5-9B-MLX-4bit`, running natively via `mlx_vlm.server` because the same server transparently handles VL models too — set `LLM_MODEL=mlx-community/Qwen3.6-27B-4bit` or any `*-VL-*` model to enable in-conversation image_url content) → TTS (Kokoro for word-timestamped lipsync, Orpheus via `mlx-audio` for higher quality, or Supertonic for 44.1kHz multilingual studio audio) → Avatar lip sync + audio playback.
 
 ## Running
 
@@ -307,4 +307,10 @@ Quirks:
 
 ## Code Style
 
-Pre-commit hooks enforce: `black` formatter (Python 3.11 target), YAML validation, trailing whitespace removal, EOF newlines. The React/TS app uses standard 2-space indent and the existing component conventions (functional components, hooks for state/effects, type-only imports where possible).
+Pre-commit hooks enforce: `ruff-format` + `ruff check --fix` (Python 3.11 target), YAML validation, trailing whitespace removal, EOF newlines. The React/TS app uses standard 2-space indent and the existing component conventions (functional components, hooks for state/effects, type-only imports where possible).
+
+Ruff config lives in `pyproject.toml` under `[tool.ruff]`. Notes:
+- **ruff replaced black** — running both ping-pongs, because they wrap some conditional expressions differently. Don't re-add black.
+- `patches/` is excluded: `patches/speaches_stt.py` is a vendored upstream speaches router bind-mounted into that container, targets its Python 3.12, and must stay diffable against upstream.
+- `E501` is off (the formatter owns line length; it only fires on unsplittable URLs / prompt strings), `SIM117` is off (nested `with pool.connection()` / `with conn.cursor()` is the idiomatic psycopg shape), and `RUF001`-`RUF003` are off (em dashes and box-drawing characters in comments are deliberate).
+- Fire-and-forget coroutines in `agent.py` go through the local `_spawn()` helper, which parks a strong reference in a set until the task completes. A bare `asyncio.ensure_future(...)` is only weakly referenced by the loop and can be garbage-collected mid-flight (`RUF006`).

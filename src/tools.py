@@ -24,10 +24,10 @@ import asyncio
 import functools
 import logging
 import time
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 from livekit.agents.llm import function_tool
-
 
 # Artificial latency on every tool so the UI's "tool running" pill stays
 # on screen long enough to see. The stubs return in <1 ms, which makes
@@ -48,10 +48,10 @@ logger = logging.getLogger("voice-agent-tools")
 # was captured BEFORE we set the sink, so contextvars don't propagate
 # in. Single-session-per-worker deployments — concurrent sessions in
 # the same process would see this clobber. Revisit when that lands.
-_event_sink: Optional[Callable[[dict[str, Any]], None]] = None
+_event_sink: Callable[[dict[str, Any]], None] | None = None
 
 
-def set_event_sink(fn: Optional[Callable[[dict[str, Any]], None]]) -> None:
+def set_event_sink(fn: Callable[[dict[str, Any]], None] | None) -> None:
     """Wire the session sink. agent.py calls this with a closure that
     publishes events on the LiveKit DataChannel. None disables event
     forwarding (e.g. for tests / standalone runs)."""
@@ -91,7 +91,9 @@ def _log_tool(func):
         # spam the log with a screenful of text.
         args_repr = ", ".join(repr(a)[:80] for a in args) if args else ""
         kwargs_repr = (
-            ", ".join(f"{k}={repr(v)[:80]}" for k, v in kwargs.items()) if kwargs else ""
+            ", ".join(f"{k}={repr(v)[:80]}" for k, v in kwargs.items())
+            if kwargs
+            else ""
         )
         sig = ", ".join(p for p in (args_repr, kwargs_repr) if p)
         logger.info("TOOL ▶ %s(%s)", name, sig)
@@ -103,10 +105,15 @@ def _log_tool(func):
         except Exception as e:
             took_ms = round((time.monotonic() - t0) * 1000)
             logger.exception("TOOL ✗ %s | took=%dms error=%s", name, took_ms, e)
-            _emit({
-                "type": "tool", "op": "error", "name": name,
-                "took_ms": took_ms, "error": str(e)[:200],
-            })
+            _emit(
+                {
+                    "type": "tool",
+                    "op": "error",
+                    "name": name,
+                    "took_ms": took_ms,
+                    "error": str(e)[:200],
+                }
+            )
             raise
 
         took_ms = round((time.monotonic() - t0) * 1000)

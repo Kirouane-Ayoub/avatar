@@ -138,3 +138,6 @@ ui/dist/
 # ~/.cache/huggingface/, so this should normally be empty.
 models/
 *.gguf
+
+# ruff writes its own .gitignore inside this dir, but be explicit.
+.ruff_cache/

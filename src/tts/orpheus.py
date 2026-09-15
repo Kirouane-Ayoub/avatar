@@ -66,7 +66,7 @@ class OrpheusTTS(tts.TTS):
         )
         self._config = config
 
-    def synthesize(self, text: str, **kwargs) -> "OrpheusChunkedStream":
+    def synthesize(self, text: str, **kwargs) -> OrpheusChunkedStream:
         return OrpheusChunkedStream(self, text, **kwargs)
 
 

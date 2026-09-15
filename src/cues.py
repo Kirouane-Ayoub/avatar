@@ -12,14 +12,36 @@ must be kept in sync when this file changes.
 """
 
 MOODS: tuple[str, ...] = (
-    "neutral", "happy", "sad", "angry", "fear", "disgust", "love", "sleep",
+    "neutral",
+    "happy",
+    "sad",
+    "angry",
+    "fear",
+    "disgust",
+    "love",
+    "sleep",
 )
 
 GESTURES: tuple[str, ...] = (
-    "handup", "index", "ok", "thumbup", "thumbdown", "side", "shrug", "namaste",
+    "handup",
+    "index",
+    "ok",
+    "thumbup",
+    "thumbdown",
+    "side",
+    "shrug",
+    "namaste",
 )
 
 POSES: tuple[str, ...] = (
-    "straight", "side", "hip", "wide", "turn", "bend", "back",
-    "oneknee", "kneel", "sitting",
+    "straight",
+    "side",
+    "hip",
+    "wide",
+    "turn",
+    "bend",
+    "back",
+    "oneknee",
+    "kneel",
+    "sitting",
 )

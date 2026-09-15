@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Optional
 
 import aiohttp
 
@@ -67,7 +68,7 @@ class VisionWatcher:
     def __init__(
         self,
         config: VisionWatcherConfig,
-        get_frame_data_url: Callable[[], Optional[str]],
+        get_frame_data_url: Callable[[], str | None],
         is_idle: Callable[[], bool],
         publish_cue: Callable[[str, str], None],
     ) -> None:
@@ -75,9 +76,9 @@ class VisionWatcher:
         self._get_frame = get_frame_data_url
         self._is_idle = is_idle
         self._publish_cue = publish_cue
-        self._task: Optional[asyncio.Task] = None
-        self._session: Optional[aiohttp.ClientSession] = None
-        self._last_mood: Optional[str] = None
+        self._task: asyncio.Task | None = None
+        self._session: aiohttp.ClientSession | None = None
+        self._last_mood: str | None = None
         self._last_change_t: float = 0.0
 
     async def start(self) -> None:
@@ -95,17 +96,15 @@ class VisionWatcher:
     async def stop(self) -> None:
         if self._task is not None:
             self._task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._task
-            except asyncio.CancelledError:
-                pass
             self._task = None
         if self._session is not None:
             await self._session.close()
             self._session = None
         logger.info("VisionWatcher stopped")
 
-    def get_last_mood(self) -> tuple[Optional[str], float]:
+    def get_last_mood(self) -> tuple[str | None, float]:
         """Snapshot of the last emitted mood + the monotonic timestamp
         when it was first detected (i.e. how long the user has held
         this mood). Returns (None, 0.0) when no mood has been emitted
@@ -136,7 +135,7 @@ class VisionWatcher:
         except Exception:
             logger.exception("VisionWatcher loop crashed")
 
-    async def _classify(self, frame_data_url: str) -> Optional[str]:
+    async def _classify(self, frame_data_url: str) -> str | None:
         """Single VLM round-trip. Returns a mood label or None on failure / pass."""
         assert self._session is not None
         payload = {
@@ -164,7 +163,7 @@ class VisionWatcher:
                     logger.warning("VLM HTTP %s: %s", resp.status, body[:200])
                     return None
                 data = await resp.json()
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.debug("VLM timeout")
             return None
         except Exception as e:
@@ -199,7 +198,10 @@ class VisionWatcher:
         if now - self._last_change_t < self._config.min_hold_s:
             logger.info(
                 "skip: hysteresis hold (%s -> %s, %.1fs since last change, need %.1fs)",
-                self._last_mood, mood, now - self._last_change_t, self._config.min_hold_s,
+                self._last_mood,
+                mood,
+                now - self._last_change_t,
+                self._config.min_hold_s,
             )
             return
         self._last_mood = mood

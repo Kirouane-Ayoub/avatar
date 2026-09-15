@@ -11,7 +11,6 @@ import uuid
 from datetime import timedelta
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Optional
 from urllib.parse import parse_qs, urlparse
 
 from dotenv import load_dotenv
@@ -19,8 +18,8 @@ from livekit.api import AccessToken, VideoGrants
 
 # Import shared modules from src/.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-from cues import MOODS  # noqa: E402
-from tts import (  # noqa: E402
+from cues import MOODS
+from tts import (
     KOKORO_VOICES,
     ORPHEUS_VOICES,
     SUPERTONIC_VOICES,
@@ -36,7 +35,9 @@ from auth import init_db  # noqa: E402
 from config import Config as _Config  # noqa: E402
 
 logger = logging.getLogger("token-server")
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+)
 
 # Module-level singletons shared by every request handler thread. The DB
 # pool is thread-safe (psycopg_pool.ConnectionPool); Config is frozen.
@@ -98,8 +99,8 @@ _TTS_SEMAPHORE = threading.BoundedSemaphore(max(1, _TTS_CONCURRENCY))
 # Signup: 5 per hour per IP — high enough for a household NAT, low
 # enough that spam-signup farms hit the wall fast.
 _RATE_LIMIT_WINDOWS = {
-    "login": (8, 300.0),     # 8 attempts / 5 min
-    "signup": (5, 3600.0),   # 5 attempts / hour
+    "login": (8, 300.0),  # 8 attempts / 5 min
+    "signup": (5, 3600.0),  # 5 attempts / hour
 }
 _rate_state: dict[tuple[str, str], list[float]] = {}
 _rate_lock = threading.Lock()
@@ -126,6 +127,7 @@ def _rate_limit_check(endpoint: str, ip: str) -> bool:
             return False
         bucket.append(now)
         return True
+
 
 # The upstream Kokoro image ships different voice sets depending on version
 # (e.g. v1.0 vs v0 carry-overs). We query the running server for its actual
@@ -291,7 +293,7 @@ class Handler(SimpleHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", "0") or 0)
         except ValueError:
             self._send_json(400, {"error": "invalid Content-Length"})
-            raise ValueError("bad content-length")
+            raise ValueError("bad content-length") from None
         if length < 0:
             self._send_json(400, {"error": "invalid Content-Length"})
             raise ValueError("negative content-length")
@@ -306,7 +308,7 @@ class Handler(SimpleHTTPRequestHandler):
             return data if isinstance(data, dict) else {}
         except json.JSONDecodeError:
             self._send_json(400, {"error": "invalid JSON"})
-            raise ValueError("bad json")
+            raise ValueError("bad json") from None
 
     def _bearer_user_id(self) -> str | None:
         """Extract user_id from Authorization: Bearer <session_jwt>.
@@ -315,7 +317,7 @@ class Handler(SimpleHTTPRequestHandler):
         if not auth_header.startswith("Bearer "):
             self._send_json(401, {"error": "missing bearer token"})
             return None
-        token = auth_header[len("Bearer "):].strip()
+        token = auth_header[len("Bearer ") :].strip()
         try:
             return auth_lib.user_id_from_token(token, _CONFIG)
         except auth_lib.InvalidToken as e:
@@ -345,7 +347,9 @@ class Handler(SimpleHTTPRequestHandler):
             "tools": avatar.tools,
             "proactive": avatar.proactive,
             "vision_watcher": avatar.vision_watcher,
-            "last_used_at": avatar.last_used_at.isoformat() if avatar.last_used_at else None,
+            "last_used_at": avatar.last_used_at.isoformat()
+            if avatar.last_used_at
+            else None,
         }
 
     def _own_avatar_or_404(self, user_id: str, avatar_id: str):
@@ -379,7 +383,8 @@ class Handler(SimpleHTTPRequestHandler):
                 return
             if not ORPHEUS_BASE_URL:
                 self._send_json(
-                    501, {"error": "orpheus preview unavailable (ORPHEUS_BASE_URL unset)"}
+                    501,
+                    {"error": "orpheus preview unavailable (ORPHEUS_BASE_URL unset)"},
                 )
                 return
         elif backend == "supertonic":
@@ -389,7 +394,9 @@ class Handler(SimpleHTTPRequestHandler):
             if not SUPERTONIC_BASE_URL:
                 self._send_json(
                     501,
-                    {"error": "supertonic preview unavailable (SUPERTONIC_BASE_URL unset)"},
+                    {
+                        "error": "supertonic preview unavailable (SUPERTONIC_BASE_URL unset)"
+                    },
                 )
                 return
         else:
@@ -413,7 +420,9 @@ class Handler(SimpleHTTPRequestHandler):
         if backend == "orpheus":
             base_url = ORPHEUS_BASE_URL
             model = ORPHEUS_MODEL  # full HF id, e.g. mlx-community/orpheus-...
-            response_format = "wav"  # mlx-audio returns a buffered WAV when stream is unset
+            response_format = (
+                "wav"  # mlx-audio returns a buffered WAV when stream is unset
+            )
         elif backend == "supertonic":
             base_url = SUPERTONIC_BASE_URL
             model = SUPERTONIC_MODEL
@@ -499,7 +508,7 @@ class Handler(SimpleHTTPRequestHandler):
         # (transcripts + Mem0 facts) without deleting the avatar itself.
         # Lets the user "start fresh" with the same companion.
         if parsed.path.startswith("/api/avatars/") and parsed.path.endswith("/forget"):
-            avatar_id = parsed.path[len("/api/avatars/"):-len("/forget")].strip("/")
+            avatar_id = parsed.path[len("/api/avatars/") : -len("/forget")].strip("/")
             if avatar_id:
                 return self._handle_forget_avatar(avatar_id)
         self.send_error(404)
@@ -521,13 +530,13 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_error(404)
 
     @staticmethod
-    def _extract_avatar_id(path: str) -> Optional[str]:
+    def _extract_avatar_id(path: str) -> str | None:
         """`/api/avatars/<id>` → <id>; otherwise None. Used by GET /
         PATCH / DELETE on a single avatar."""
         prefix = "/api/avatars/"
         if not path.startswith(prefix):
             return None
-        avatar_id = path[len(prefix):].strip("/")
+        avatar_id = path[len(prefix) :].strip("/")
         return avatar_id or None
 
     # ── DELETE /api/me — wipe account + every avatar + their memories ──
@@ -556,7 +565,8 @@ class Handler(SimpleHTTPRequestHandler):
             # below mirrors the login path: lookup by username + verify.
             try:
                 auth_lib.login(
-                    _DB, _CONFIG,
+                    _DB,
+                    _CONFIG,
                     username=user_check.username,
                     password=password,
                 )
@@ -571,22 +581,31 @@ class Handler(SimpleHTTPRequestHandler):
         # BEFORE deleting the user. The user delete CASCADEs to the
         # avatar rows via the FK; the memory rows are owned by Mem0 in
         # its own table and need explicit cleanup or they're orphaned.
-        from memory import build_provider  # noqa: E402 — lazy keeps boot light
         import asyncio
+
+        from memory import build_provider
+
         try:
             avatars = _DB.list_avatars(user_id)
             if avatars:
                 provider = build_provider(_CONFIG)
+
                 async def _wipe_all():
                     for av in avatars:
                         await provider.forget(av.id)
+
                 asyncio.run(_wipe_all())
         except Exception:
-            logger.exception("memory wipe failed for user_id=%s — proceeding with user delete", user_id)
+            logger.exception(
+                "memory wipe failed for user_id=%s — proceeding with user delete",
+                user_id,
+            )
         deleted = _DB.delete_user(user_id)
         logger.info(
             "delete account: user_id=%s avatars_wiped=%d row_deleted=%s",
-            user_id, len(avatars) if 'avatars' in locals() else 0, deleted,
+            user_id,
+            len(avatars) if "avatars" in locals() else 0,
+            deleted,
         )
         self._send_json(200, {"ok": True, "deleted": deleted})
 
@@ -617,8 +636,11 @@ class Handler(SimpleHTTPRequestHandler):
             display_name = display_name.strip()[:MAX_DISPLAY_NAME_LEN]
         try:
             user, token = auth_lib.signup(
-                _DB, _CONFIG,
-                username=username, password=password, display_name=display_name,
+                _DB,
+                _CONFIG,
+                username=username,
+                password=password,
+                display_name=display_name,
             )
         except auth_lib.UsernameTaken:
             return self._send_json(409, {"error": "username already taken"})
@@ -632,15 +654,19 @@ class Handler(SimpleHTTPRequestHandler):
     # ── /api/login ──────────────────────────────────────────────────────
     def _handle_login(self):
         if not _rate_limit_check("login", self._client_ip()):
-            return self._send_json(429, {"error": "too many login attempts, try again later"})
+            return self._send_json(
+                429, {"error": "too many login attempts, try again later"}
+            )
         try:
             body = self._read_json_body()
         except ValueError:
             return
         try:
             user, token = auth_lib.login(
-                _DB, _CONFIG,
-                username=body.get("username", ""), password=body.get("password", ""),
+                _DB,
+                _CONFIG,
+                username=body.get("username", ""),
+                password=body.get("password", ""),
             )
         except auth_lib.InvalidCredentials:
             return self._send_json(401, {"error": "invalid username or password"})
@@ -718,7 +744,8 @@ class Handler(SimpleHTTPRequestHandler):
         self._send_json(
             200,
             {
-                "token": token, "url": LIVEKIT_EXTERNAL_URL,
+                "token": token,
+                "url": LIVEKIT_EXTERNAL_URL,
                 "config": cfg,
                 "user": self._user_to_json(user),
                 "avatar": self._avatar_to_json(avatar),
@@ -787,7 +814,9 @@ class Handler(SimpleHTTPRequestHandler):
         if "vision_watcher" in body:
             kwargs["vision_watcher"] = bool(cfg.get("vision_watcher", True))
         updated = _DB.update_avatar(avatar.id, **kwargs)
-        self._send_json(200, {"avatar": self._avatar_to_json(updated) if updated else None})
+        self._send_json(
+            200, {"avatar": self._avatar_to_json(updated) if updated else None}
+        )
 
     # ── POST /api/avatars/:id/forget — wipe memory, KEEP avatar row ─────
     def _handle_forget_avatar(self, avatar_id: str):
@@ -816,8 +845,10 @@ class Handler(SimpleHTTPRequestHandler):
             logger.exception("transcript wipe failed for avatar_id=%s", avatar.id)
         # Step 2: Mem0 (best-effort — no separate count available from
         # the Mem0 SDK, so we just report ok/error).
-        from memory import build_provider  # noqa: E402 — lazy keeps boot light
         import asyncio
+
+        from memory import build_provider
+
         memory_ok = True
         try:
             provider = build_provider(_CONFIG)
@@ -827,13 +858,18 @@ class Handler(SimpleHTTPRequestHandler):
             memory_ok = False
         logger.info(
             "forget avatar: avatar_id=%s transcripts_deleted=%d memory_ok=%s",
-            avatar.id, transcripts_deleted, memory_ok,
+            avatar.id,
+            transcripts_deleted,
+            memory_ok,
         )
-        self._send_json(200, {
-            "ok": True,
-            "transcripts_deleted": transcripts_deleted,
-            "memory_cleared": memory_ok,
-        })
+        self._send_json(
+            200,
+            {
+                "ok": True,
+                "transcripts_deleted": transcripts_deleted,
+                "memory_cleared": memory_ok,
+            },
+        )
 
     # ── DELETE /api/avatars/:id — wipe avatar + its memories ────────────
     def _handle_delete_avatar(self, avatar_id: str):
@@ -846,13 +882,18 @@ class Handler(SimpleHTTPRequestHandler):
         # Wipe Mem0 memories for this avatar BEFORE deleting the row so
         # they don't end up orphaned. Best-effort; a memory failure
         # shouldn't block the user from removing the avatar.
-        from memory import build_provider  # noqa: E402
         import asyncio
+
+        from memory import build_provider
+
         try:
             provider = build_provider(_CONFIG)
             asyncio.run(provider.forget(avatar.id))
         except Exception:
-            logger.exception("memory wipe failed for avatar_id=%s — proceeding with delete", avatar.id)
+            logger.exception(
+                "memory wipe failed for avatar_id=%s — proceeding with delete",
+                avatar.id,
+            )
         deleted = _DB.delete_avatar(avatar.id)
         logger.info("delete avatar: avatar_id=%s row_deleted=%s", avatar.id, deleted)
         self._send_json(200, {"ok": True, "deleted": deleted})
@@ -880,7 +921,9 @@ class Handler(SimpleHTTPRequestHandler):
             if user_id is None:
                 return
             avatars = _DB.list_avatars(user_id)
-            return self._send_json(200, {"avatars": [self._avatar_to_json(a) for a in avatars]})
+            return self._send_json(
+                200, {"avatars": [self._avatar_to_json(a) for a in avatars]}
+            )
         avatar_id = self._extract_avatar_id(parsed.path)
         if avatar_id is not None:
             user_id = self._bearer_user_id()
